@@ -1,0 +1,18 @@
+# YOLOv8 Dataset Configuration for Egg and Tray Detection
+#
+# Replace the paths below with absolute paths to your dataset if needed.
+# For example: path: /absolute/path/to/giotag_project/dataset
+
+path: .  # dataset root dir (relative to the directory where YOLO is run, or absolute)
+train: images/train  # train images (relative to 'path')
+val: images/val      # val images (relative to 'path')
+test: images/test    # test images (optional)
+
+# Classes
+names:
+  0: egg
+  1: egg_tray
+  # Optional: expand to below classes if tray-type classification is required later:
+  # 1: paper_tray
+  # 2: plastic_tray
+  # 3: colored_tray

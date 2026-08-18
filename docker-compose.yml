@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: giotag_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-giotag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-giotag_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-giotag_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-giotag}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: giotag_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-giotag}:${POSTGRES_PASSWORD:-giotag_secret}@postgres:5432/${POSTGRES_DB:-giotag_db}
+      SECRET_KEY: ${SECRET_KEY:-changeme-super-secret-jwt-key-32chars}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      REFRESH_TOKEN_EXPIRE_DAYS: 7
+      STORAGE_BACKEND: local
+      LOCAL_STORAGE_PATH: /app/uploads
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+      BLOCKCHAIN_MODE: local
+      ENVIRONMENT: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/app/blockchain/ledger_data.json:/app/app/blockchain/ledger_data.json
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: giotag_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+
+volumes:
+  postgres_data:

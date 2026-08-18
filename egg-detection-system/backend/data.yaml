@@ -1,0 +1,6 @@
+path: c:/Users/sachi/Downloads/giotag project/egg-detection-system/dataset
+train: images/train
+val: images/val
+
+names:
+  0: egg_tray

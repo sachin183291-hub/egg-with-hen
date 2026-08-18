@@ -1,0 +1,87 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+*.so
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+*.env
+*.env.local
+*.env.*.local
+
+# FastAPI / Alembic
+backend/alembic/versions/*.pyc
+
+# Uploads
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Blockchain local ledger
+backend/app/blockchain/ledger_data.json
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+*.local
+frontend/.env
+frontend/dist/
+
+# Flutter / Mobile
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/key.properties
+mobile/android/app/google-services.json
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/App.framework
+mobile/ios/Flutter/Flutter.framework
+*.iml
+*.ipr
+*.iws
+.idea/
+.gradle/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Editors
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Database
+*.sqlite3
+*.db

@@ -1,0 +1,17 @@
+# YOLOv8 Dataset Configuration File
+# This file tells the YOLO model where to find the dataset and what classes to predict.
+
+# Path to the dataset root directory (relative or absolute)
+path: ../dataset
+
+# Train, Val, Test image directories (relative to 'path')
+train: images/train
+val: images/val
+test: images/test  # Optional
+
+# Classes
+# You can expand this list later if you want to classify tray types (e.g., 1: paper_tray, 2: plastic_tray)
+# Just ensure your dataset labels use the correct integer IDs corresponding to this list.
+names:
+  0: egg
+  1: egg_tray
