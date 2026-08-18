@@ -1,0 +1,7 @@
+# Ignore everything except frontend to prevent Vercel from deploying Python/PyTorch
+backend/
+mobile/
+egg-detection-system/
+*.pt
+*.sqlite3
+*.db
