@@ -85,3 +85,4 @@ logs/
 # Database
 *.sqlite3
 *.db
+*.pt
