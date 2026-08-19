@@ -52,7 +52,7 @@ SYSTEM_INSTRUCTION = (
     '  },\n'
     '  "confidence": "<high|medium|low>",\n'
     '  "image_quality": "<good|fair|poor>",\n'
-    '  "notes": "<brief explanation describing detected objects, specifying whether real objects or hand-drawn/synthetic test shapes were counted>"\n'
+    '  "notes": "<brief explanation describing detected objects, specifying whether real objects or hand-drawn/synthetic test shapes were counted. IMPORTANT: This MUST be in the Tamil language (Tamil script)>"\n'
     "}\n\n"
     "confidence rules:\n"
     "  high   = image or drawing is clear and objects are distinctly countable\n"
@@ -62,7 +62,7 @@ SYSTEM_INSTRUCTION = (
     "  good = clear, well-lit photograph or sharp, clean drawing/diagram\n"
     "  fair = acceptable photograph or rough hand-drawn sketch\n"
     "  poor = blurry, dark, or severely occluded\n\n"
-    "Return ONLY the JSON object. No markdown, no code fences, no extra text."
+    "Return ONLY the JSON object. No markdown, no code fences, no extra text. IMPORTANT: The 'notes' field MUST be in Tamil language."
 )
 
 # ─── Chat instruction (same core rules, conversational tone) ──────────────────
@@ -76,7 +76,8 @@ CHAT_SYSTEM_INSTRUCTION = (
     "- CRITICAL RED LINE RULE: If you see red horizontal lines drawn over the trays, count those red lines. The total number of red lines is the tray count.\n"
     "- Recognize tray types: green plastic, paper/cardboard, other colors, etc.\n"
     "- Answer user questions clearly and provide accurate counts for eggs, trays, and hens.\n\n"
-    "Answer the user's question directly and concisely."
+    "Answer the user's question directly and concisely.\n"
+    "IMPORTANT: You MUST reply entirely in the Tamil language (using Tamil script)."
 )
 
 
