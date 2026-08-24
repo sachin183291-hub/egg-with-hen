@@ -15,6 +15,7 @@ import ReportsPage from './pages/ReportsPage'
 import SettingsPage from './pages/SettingsPage'
 import EggCounterPage from './pages/EggCounterPage'
 import EggAIChatPage from './pages/EggAIChatPage'
+import HenHealthPage from './pages/HenHealthPage'
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="/ai-verification" element={<AIVerificationPage />} />
           <Route path="/egg-counter"     element={<EggCounterPage />} />
           <Route path="/egg-ai-chat"    element={<EggAIChatPage />} />
+          <Route path="/hen-health"     element={<HenHealthPage />} />
           <Route path="/blockchain"      element={<BlockchainPage />} />
           <Route path="/audit-logs"      element={<AuditLogsPage />} />
           <Route path="/reports"         element={<ReportsPage />} />

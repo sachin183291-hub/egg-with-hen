@@ -57,30 +57,30 @@ export default function LoginPage() {
         </div>
         <div className="auth-illustration-content">
           <div className="auth-brand-badge">
-            <img src="/giotag-logo.jpg" alt="GioTag Logo" style={{ width: '24px', height: '24px', borderRadius: '4px', objectFit: 'cover', marginRight: '6px' }} />
-            <span>GioTag Enterprise</span>
+            <img src="https://img.sanishtech.com/u/e4981fe5381a1990b40fb04b81c7173d.png" alt="KR Group Logo" style={{ height: '32px', width: 'auto', objectFit: 'contain', marginRight: '8px' }} />
+            <span>KR Group POULTRY</span>
           </div>
           <h1 className="auth-hero-title">
-            Secure Geotagged <br />
-            <span className="text-gradient">Evidence System</span>
+            Smart Poultry <br />
+            <span className="text-gradient">Management System</span>
           </h1>
           <p className="auth-hero-subtitle">
-            Next generation geospatial intelligence and tamper-proof verification powered by blockchain and AI.
+            Advanced AI-powered egg counting and monitoring platform for modern poultry farms.
           </p>
           
           <div className="auth-features">
             <div className="feature-item">
-              <div className="feature-icon"><Map size={20} /></div>
+              <div className="feature-icon"><Map /></div>
               <div>
-                <h4>Precision Mapping</h4>
-                <p>High-accuracy GPS tracking</p>
+                <h4>Automated Egg Counting</h4>
+                <p>AI-powered real-time detection</p>
               </div>
             </div>
             <div className="feature-item">
-              <div className="feature-icon"><Zap size={20} /></div>
+              <div className="feature-icon"><Zap /></div>
               <div>
-                <h4>AI Verification</h4>
-                <p>Automated spoof detection</p>
+                <h4>Analytics & Reports</h4>
+                <p>Track production efficiency easily</p>
               </div>
             </div>
           </div>

@@ -12,7 +12,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.svg', 'giotag-logo.jpg', 'bg-image.png'],
+        includeAssets: ['favicon.svg', 'kr-logo.png', 'bg-image.png'],
         manifest: {
           name: 'GioTag Egg Counter',
           short_name: 'GioTag',
@@ -22,14 +22,14 @@ export default defineConfig(({ mode }) => {
           display: 'standalone',
           icons: [
             {
-              src: 'giotag-logo.jpg',
+              src: 'kr-logo.png',
               sizes: '192x192',
-              type: 'image/jpeg'
+              type: 'image/png'
             },
             {
-              src: 'giotag-logo.jpg',
+              src: 'kr-logo.png',
               sizes: '512x512',
-              type: 'image/jpeg'
+              type: 'image/png'
             }
           ]
         }

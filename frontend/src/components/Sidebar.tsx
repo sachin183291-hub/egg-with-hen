@@ -4,7 +4,7 @@ import { getInitials } from '../utils/helpers'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Map, Image, Users, Cpu, Blocks,
-  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe
+  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse
 } from 'lucide-react'
 
 const navItems = [
@@ -21,6 +21,7 @@ const navItems = [
     { to: '/ai-verification', label: 'AI Verification', icon: Cpu },
     { to: '/egg-counter', label: 'Egg Counter', icon: CheckSquare },
     { to: '/egg-ai-chat', label: 'AI Vision Chat', icon: MessageCircle },
+    { to: '/hen-health', label: 'Hen Health', icon: HeartPulse },
     { to: '/blockchain', label: 'Blockchain', icon: Blocks },
   ]},
   { group: 'Records', items: [
@@ -54,10 +55,10 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <div className="sidebar-logo-mark">
-            <img src="/giotag-logo.jpg" alt="GioTag Logo" style={{ width: '32px', height: '32px', borderRadius: '8px', objectFit: 'cover' }} />
-            <div className="sidebar-logo-text">
-              <span className="sidebar-logo-name">GioTag</span>
-              <span className="sidebar-logo-sub">{t('sidebar.subtitle')}</span>
+            <img src="https://img.sanishtech.com/u/e4981fe5381a1990b40fb04b81c7173d.png" alt="KR Group Logo" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
+            <div className="sidebar-logo-text" style={{ marginLeft: '10px' }}>
+              <span className="sidebar-logo-name">KR Group</span>
+              <span className="sidebar-logo-sub">POULTRY</span>
             </div>
           </div>
         </div>

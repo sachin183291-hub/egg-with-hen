@@ -3,7 +3,7 @@ from jose import jwt
 from datetime import datetime, timedelta
 
 SECRET_KEY = "changeme-super-secret-jwt-key-minimum-32-characters-long"
-ALGORITHM = "HS256"
+ALGORITHM = "HS256" 
 
 def create_access_token(data: dict):
     to_encode = data.copy()

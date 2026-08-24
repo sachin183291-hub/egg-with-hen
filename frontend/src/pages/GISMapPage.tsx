@@ -33,7 +33,7 @@ export default function GISMapPage() {
       return
     }
 
-    const map = L.map(mapDivRef.current, { zoomControl: true }).setView([39.5, -98.35], 4)
+    const map = L.map(mapDivRef.current, { zoomControl: true }).setView([11.0890, 78.1220], 10)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors',
     }).addTo(map)
@@ -51,8 +51,46 @@ export default function GISMapPage() {
   useEffect(() => {
     gisApi.evidence(statusFilter ? { status: statusFilter } : {})
       .then(r => {
-        setMarkers(r.data)
-        renderMarkers(r.data)
+        const mockPoultryMarkers: GISMarker[] = [
+          {
+            evidence_id: 'mock-poultry-1',
+            evidence_number: 'Farm Unit 1 - Sick Hen Detected',
+            latitude: 10.9598,
+            longitude: 78.0766, // Karur
+            status: 'SUSPICIOUS',
+            officer_name: 'Camera Cam-Karur-01',
+            capture_timestamp: new Date().toISOString(),
+            ai_confidence: 0.94,
+            blockchain_status: 'REGISTERED'
+          },
+          {
+            evidence_id: 'mock-poultry-2',
+            evidence_number: 'Farm Unit 2 - Flock Normal',
+            latitude: 11.2189,
+            longitude: 78.1670, // Namakkal
+            status: 'VERIFIED',
+            officer_name: 'Camera Cam-Namakkal-05',
+            capture_timestamp: new Date().toISOString(),
+            ai_confidence: 0.99,
+            blockchain_status: 'REGISTERED'
+          },
+          {
+            evidence_id: 'mock-poultry-3',
+            evidence_number: 'Farm Unit 3 - Review Required',
+            latitude: 11.1098,
+            longitude: 78.0197, // Paramathi Velur
+            status: 'REVIEW_REQUIRED',
+            officer_name: 'Drone D-Velur-02',
+            capture_timestamp: new Date(Date.now() - 3600000).toISOString(),
+            ai_confidence: 0.78,
+            blockchain_status: 'REGISTERED'
+          }
+        ];
+        
+        // Combine DB markers with our mock poultry detection examples
+        const combined = [...mockPoultryMarkers, ...r.data];
+        setMarkers(combined)
+        renderMarkers(combined)
       })
       .catch(() => toast.error('Failed to load map data'))
       .finally(() => setLoading(false))
@@ -83,12 +121,12 @@ export default function GISMapPage() {
 
       const popupContent = `
         <div class="evidence-popup">
-          <h4>${marker.evidence_number}</h4>
-          <p>👮 ${marker.officer_name}</p>
-          <p>📅 ${new Date(marker.capture_timestamp).toLocaleString()}</p>
-          <p>📍 ${marker.latitude.toFixed(5)}, ${marker.longitude.toFixed(5)}</p>
-          <p>Status: <strong>${marker.status.replace('_', ' ')}</strong></p>
-          ${marker.ai_confidence != null ? `<p>AI Confidence: ${(marker.ai_confidence * 100).toFixed(0)}%</p>` : ''}
+          <h4 style="color: var(--brand-600); margin-bottom: 4px;">${marker.evidence_number}</h4>
+          <p>📷 <strong>Source:</strong> ${marker.officer_name}</p>
+          <p>📅 <strong>Time:</strong> ${new Date(marker.capture_timestamp).toLocaleString()}</p>
+          <p>📍 <strong>GPS:</strong> ${marker.latitude.toFixed(5)}, ${marker.longitude.toFixed(5)}</p>
+          <p>🩺 <strong>Status:</strong> <span style="color: ${color}; font-weight: bold;">${marker.status.replace('_', ' ')}</span></p>
+          ${marker.ai_confidence != null ? `<p>🧠 <strong>AI Confidence:</strong> ${(marker.ai_confidence * 100).toFixed(0)}%</p>` : ''}
         </div>
       `
       lmarker.bindPopup(popupContent)

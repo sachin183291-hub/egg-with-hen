@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { dashboardApi } from '../services/api'
 import type { DashboardStats } from '../types'
 import { formatDate } from '../utils/helpers'
@@ -8,7 +9,7 @@ import {
 } from 'recharts'
 import {
   Image, CheckCircle, AlertTriangle, Clock, Users,
-  Smartphone, Blocks, TrendingUp, Shield
+  Smartphone, Blocks, TrendingUp, Shield, HeartPulse, Camera, Activity
 } from 'lucide-react'
 
 interface TrendPoint { date: string; count: number }
@@ -60,8 +61,15 @@ export default function DashboardPage() {
     { label:'This Week',      value: stats.evidence_this_week, icon: TrendingUp, color:'#14b8a6', sub:'Evidence captured' },
   ] : []
 
+  const healthStats = [
+    { label: 'Total Flocks Monitored', value: 1250, icon: Activity, color: '#3b82f6', sub: '+12 this week' },
+    { label: 'Healthy Hens', value: 1142, icon: CheckCircle, color: '#10b981', sub: '91.3% of total' },
+    { label: 'Attention Required', value: 108, icon: AlertTriangle, color: '#f59e0b', sub: 'Minor issues detected' },
+    { label: 'Critical Health', value: 0, icon: HeartPulse, color: '#ef4444', sub: 'Urgent care needed' },
+  ]
+
   return (
-    <div>
+    <div className="page-with-bg">
       <div className="page-header">
         <div>
           <h1 className="page-title">Mission Control</h1>
@@ -76,6 +84,29 @@ export default function DashboardPage() {
       {/* Stat Cards */}
       <div className="stat-grid">
         {statCards.map((card) => (
+          <div key={card.label} className="stat-card" style={{ '--stat-color': card.color } as React.CSSProperties}>
+            <div className="stat-icon">
+              <card.icon size={20} color={card.color} />
+            </div>
+            <div>
+              <div className="stat-value">{card.value.toLocaleString()}</div>
+              <div className="stat-label">{card.label}</div>
+              <div className="stat-change" style={{ color: card.color }}>{card.sub}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: '32px', marginBottom: '16px' }}>
+        <h2 className="page-title" style={{ fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <HeartPulse size={20} color="#ef4444" />
+          Poultry Health Metrics
+        </h2>
+      </div>
+
+      {/* Health Stat Cards */}
+      <div className="stat-grid" style={{ marginBottom: '32px' }}>
+        {healthStats.map((card) => (
           <div key={card.label} className="stat-card" style={{ '--stat-color': card.color } as React.CSSProperties}>
             <div className="stat-icon">
               <card.icon size={20} color={card.color} />
@@ -129,6 +160,51 @@ export default function DashboardPage() {
               <Legend formatter={(v) => <span style={{ color:'#94a3b8', fontSize:11 }}>{v}</span>} />
             </PieChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Quick Actions Section */}
+      <div className="card" style={{ marginTop: '24px' }}>
+        <div className="card-header">
+          <h3 className="card-title">Quick Actions</h3>
+        </div>
+        <div style={{ padding: '24px', display: 'flex', gap: '16px' }}>
+          <Link to="/hen-health" style={{ textDecoration: 'none', flex: 1 }}>
+            <div style={{ 
+              background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              borderRadius: '12px',
+              padding: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '20px',
+              transition: 'all 0.2s ease',
+              cursor: 'pointer'
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)'
+              e.currentTarget.style.boxShadow = '0 8px 24px rgba(239, 68, 68, 0.15)'
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)'
+              e.currentTarget.style.boxShadow = 'none'
+            }}
+            >
+              <div style={{ 
+                width: '64px', height: '64px', borderRadius: '16px', background: '#ef4444', 
+                display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(239, 68, 68, 0.4)'
+              }}>
+                <HeartPulse color="white" size={32} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '4px' }}>Hen Health AI Diagnostics</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>Upload images of poultry to detect health issues instantly using AI.</p>
+              </div>
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', color: '#ef4444', fontWeight: '600', fontSize: '0.9rem' }}>
+                <Camera size={18} /> Open Scanner
+              </div>
+            </div>
+          </Link>
         </div>
       </div>
 

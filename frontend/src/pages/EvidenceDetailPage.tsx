@@ -19,6 +19,53 @@ export default function EvidenceDetailPage() {
 
   useEffect(() => {
     if (!id) return
+
+    // Intercept mock IDs from the GIS Map
+    if (id.startsWith('mock-poultry-')) {
+      const isSick = id.includes('-1');
+      const isReview = id.includes('-3');
+      const mockEv: any = {
+        id,
+        evidence_number: isSick ? 'Farm Unit 1 - Sick Hen Detected' : (isReview ? 'Farm Unit 3 - Review Required' : 'Farm Unit 2 - Flock Normal'),
+        status: isSick ? 'SUSPICIOUS' : (isReview ? 'REVIEW_REQUIRED' : 'VERIFIED'),
+        image_filename: isSick ? 'sick_hen_cam_01.jpg' : (isReview ? 'low_activity_drone.jpg' : 'normal_flock_05.jpg'),
+        image_size_bytes: 2543000,
+        image_mime_type: 'image/jpeg',
+        created_at: new Date().toISOString(),
+        image_sha256_hash: 'a8b1c4e8b39...',
+        user: { full_name: 'AI Camera System' },
+        metadata_: {
+          capture_timestamp: new Date().toISOString(),
+          latitude: isSick ? 10.9598 : (isReview ? 11.1098 : 11.2189),
+          longitude: isSick ? 78.0766 : (isReview ? 78.0197 : 78.1670),
+          timezone: 'Asia/Kolkata',
+          device_model: isReview ? 'Drone' : 'CCTV',
+          os_type: 'Linux'
+        },
+        ai_verification: {
+          status: isSick ? 'SUSPICIOUS' : (isReview ? 'REVIEW_REQUIRED' : 'VERIFIED'),
+          tamper_probability: isSick ? 0.85 : 0.05,
+          confidence_score: 0.94,
+          verification_message: isSick ? 'Health Alert: High probability of respiratory distress or lethargy detected in flock.' : (isReview ? 'Warning: Lower than average movement detected.' : 'Flock activity and behavior appears perfectly normal.'),
+          model_version: 'Poultry-Vision-v2.1',
+          verified_at: new Date().toISOString()
+        },
+        blockchain_record: {
+          status: 'REGISTERED',
+          block_number: 14205,
+          provider: 'GioTag Ledger',
+          block_hash: '0xabc123456...',
+          transaction_id: 'tx_998877...',
+          registered_at: new Date().toISOString()
+        }
+      }
+      setTimeout(() => {
+        setEvidence(mockEv as Evidence)
+        setLoading(false)
+      }, 500)
+      return
+    }
+
     evidenceApi.get(id)
       .then(r => setEvidence(r.data))
       .catch(() => toast.error('Evidence not found'))
