@@ -39,7 +39,6 @@ export default function DashboardLayout() {
               className="mobile-menu-btn"
               onClick={() => setIsMobileMenuOpen(true)}
               style={{
-                display: 'none', // Hidden on desktop, we'll show it via media query
                 background: 'none',
                 border: 'none',
                 color: 'var(--text-primary)',

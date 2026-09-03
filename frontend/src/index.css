@@ -141,6 +141,10 @@ p  { line-height: 1.6; color: var(--text-secondary); }
   z-index: 50;
 }
 
+.mobile-menu-btn {
+  display: none;
+}
+
 .page-header {
   background: var(--bg-card);
   backdrop-filter: blur(16px);
@@ -1118,7 +1122,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 }
 
 /* ─── Mobile Responsiveness (Flutter-like Experience) ─── */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   /* Sidebar */
   .sidebar {
     transform: translateX(-100%);
@@ -1172,6 +1176,13 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   .dual-ai-grid {
     grid-template-columns: 1fr !important;
   }
+}
+
+@media (max-width: 768px) {
+  .stat-grid { grid-template-columns: 1fr; }
+  .charts-grid { grid-template-columns: 1fr; }
+  .detail-grid { grid-template-columns: 1fr; }
+  .auth-card { padding: 28px 20px; }
 }
 
 /* Sidebar Backdrop Overlay */
