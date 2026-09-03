@@ -22,13 +22,9 @@ services:
       - key: CORS_ORIGINS
         value: "*"
       - key: LOCAL_STORAGE_PATH
-        value: /var/data/uploads
+        value: ./uploads
       - key: LOCAL_LEDGER_PATH
-        value: /var/data/ledger_data.json
-    disk:
-      name: evidence-disk
-      mountPath: /var/data
-      sizeGB: 1
+        value: ./app/blockchain/ledger_data.json
 
   - type: web
     name: giotag-frontend
