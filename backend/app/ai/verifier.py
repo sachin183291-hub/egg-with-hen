@@ -105,24 +105,39 @@ class OpenCVVerifier(BaseVerifier):
         # Step 4: Screen Recapture analysis via LLM (GPT-4o)
         from app.ai.llm_authenticity_checker import check_image_authenticity
         llm_result = check_image_authenticity(image_bytes)
-        is_screen = llm_result.get("is_screen_recapture", False)
+        llm_is_screen = llm_result.get("is_screen_recapture", False)
         llm_confidence = llm_result.get("confidence", 0.0)
         llm_reason = llm_result.get("reason", "")
+        
+        # Step 4.5: OpenCV FFT Moire Analysis
+        from app.ai.moire_analysis import perform_moire_analysis
+        moire_result = perform_moire_analysis(image_bytes)
+        moire_is_screen = moire_result.get("is_screen", False)
+        moire_score = moire_result.get("moire_score", 0.0)
 
         # Step 5: Aggregate scores (kept for backwards compatibility of metadata)
         combined_score = (ela_score * 0.5) + (noise_score * 0.5)
 
         # Step 6: Determine status
-        # Only use Screen Recapture from LLM to flag as SUSPICIOUS based on user feedback.
-        # ELA and Noise are kept for metadata but do not trigger SUSPICIOUS status.
+        # Trigger SUSPICIOUS if either LLM or OpenCV detects a screen recapture
+        is_screen = llm_is_screen or moire_is_screen
+        
         if is_screen:
             status = "SUSPICIOUS"
-            message = (
-                "AI-assisted verification: Screen Recapture Detected! "
-                f"The AI determined this is a photo of a screen rather than a live photo. Reason: {llm_reason}"
-            )
-            confidence = max(0.9, llm_confidence)
-            tamper_probability = max(0.7, llm_confidence)
+            if moire_is_screen and not llm_is_screen:
+                message = (
+                    "AI-assisted verification: Screen Recapture Detected! "
+                    f"The FFT analysis detected periodic Moiré patterns indicative of a pixel grid (Mobile, Tab, or Laptop screen). "
+                )
+                confidence = max(0.8, moire_score)
+                tamper_probability = max(0.7, moire_score)
+            else:
+                message = (
+                    "AI-assisted verification: Screen Recapture Detected! "
+                    f"The AI determined this is a photo of a screen rather than a live photo. Reason: {llm_reason}"
+                )
+                confidence = max(0.9, llm_confidence)
+                tamper_probability = max(0.7, llm_confidence)
         else:
             status = "VERIFIED"
             message = (
@@ -140,7 +155,8 @@ class OpenCVVerifier(BaseVerifier):
             "details": {
                 "ela_score": ela_score,
                 "noise_score": noise_score,
-                "llm_is_screen": is_screen,
+                "moire_score": moire_score,
+                "llm_is_screen": llm_is_screen,
                 "llm_confidence": llm_confidence,
                 "llm_reason": llm_reason,
                 "combined_score": round(combined_score, 4),
