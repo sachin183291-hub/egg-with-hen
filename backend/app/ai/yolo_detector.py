@@ -58,4 +58,36 @@ class CustomYOLODetector(ImageDetector):
         else:
             reply = "I'm a local object detection model. Please upload an image for me to count eggs or trays."
             
-        return {"reply": reply, "analysis": analysis}
+    def analyze_dual(self, top_image_bytes: bytes, side_image_bytes: bytes, mime_type_top: str = "image/jpeg", mime_type_side: str = "image/jpeg", target: str = "trays") -> dict:
+        """
+        Analyze dual images (top view and side view) using YOLO.
+        Since YOLO works on a single image, we can just analyze the top view and side view separately
+        and combine the results, or just analyze the side view to count stacks.
+        """
+        try:
+            top_results = detect_objects(top_image_bytes)
+            side_results = detect_objects(side_image_bytes)
+            
+            # Simple heuristic: YOLO counts all trays.
+            # Assuming side view gives us stacks or trays directly.
+            tray_count = side_results.get("tray_count", 0) + top_results.get("tray_count", 0)
+            egg_count = tray_count * 30
+            
+            return {
+                "success": True,
+                "egg_count": egg_count,
+                "tray_count": tray_count,
+                "hen_count": 0,
+                "tray_types": {
+                    "green_plastic": 0,
+                    "paper_cardboard": 0,
+                    "other": 0,
+                    "unknown": tray_count
+                },
+                "confidence": "medium",
+                "image_quality": "good",
+                "notes": "Detected using local YOLO model."
+            }
+        except Exception as exc:
+            logger.error("YOLO dual detection error: %s", exc, exc_info=True)
+            raise

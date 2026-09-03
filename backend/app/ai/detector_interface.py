@@ -78,8 +78,12 @@ def get_detector(provider: Optional[str] = None) -> ImageDetector:
         return OpenAIVisionDetector()
         
     if selected == "gemini":
-        from app.ai.gemini_vision import GeminiVisionDetector
-        return GeminiVisionDetector()
+        try:
+            from app.ai.gemini_vision import GeminiVisionDetector
+            return GeminiVisionDetector()
+        except RuntimeError:
+            from app.ai.yolo_detector import CustomYOLODetector
+            return CustomYOLODetector()
 
     if selected == "yolo":
         from app.ai.yolo_detector import CustomYOLODetector
