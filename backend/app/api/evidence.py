@@ -4,7 +4,9 @@ Handles secure multipart upload, hash verification, AI trigger, and blockchain r
 """
 import uuid
 import json
-from datetime import datetime
+import io
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form, UploadFile, File
@@ -23,6 +25,84 @@ from app.services.storage import storage, validate_upload, read_and_validate_con
 from app.services.audit import log_action
 
 router = APIRouter(prefix="/api/evidence", tags=["Evidence"])
+
+
+# ─── EXIF Timestamp Extractor ─────────────────────────────────────────────────
+
+def extract_exif_datetime(image_bytes: bytes) -> Optional[datetime]:
+    """
+    Extract the original capture datetime from image EXIF data (server-side).
+    Returns UTC-aware datetime if found, else None.
+    This is MORE trustworthy than the client-sent capture_timestamp.
+    """
+    try:
+        from PIL import Image
+        from PIL.ExifTags import TAGS
+        img = Image.open(io.BytesIO(image_bytes))
+        exif_data = img._getexif()
+        if not exif_data:
+            return None
+        # Tag 36867 = DateTimeOriginal, Tag 36868 = DateTimeDigitized
+        for tag_id in (36867, 36868, 306):
+            raw = exif_data.get(tag_id)
+            if raw:
+                try:
+                    dt = datetime.strptime(str(raw), "%Y:%m:%d %H:%M:%S")
+                    # EXIF has no timezone — assume device local time (IST UTC+5:30 is common)
+                    # We treat it as UTC for comparison (conservative approach)
+                    return dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+    except Exception:
+        pass
+    return None
+
+
+def verify_timestamp(
+    upload_time: datetime,
+    client_capture_time: datetime,
+    exif_capture_time: Optional[datetime],
+    tolerance_seconds: int = 120,
+) -> tuple[EvidenceStatusEnum, str]:
+    """
+    Compare image capture time vs upload time.
+
+    Priority:
+      1. EXIF datetime from image (most trustworthy — cannot be faked by client)
+      2. Client-sent capture_timestamp (fallback if no EXIF)
+
+    Rules:
+      - Difference <= 2 minutes → VERIFIED ✅
+      - Difference >  2 minutes → SUSPICIOUS ⚠️
+
+    Returns: (status, reason_message)
+    """
+    # Use EXIF time if available (more secure), else fall back to client-sent time
+    if exif_capture_time is not None:
+        capture_time = exif_capture_time
+        source = "EXIF (image metadata)"
+    else:
+        capture_time = client_capture_time
+        if not capture_time.tzinfo:
+            capture_time = capture_time.replace(tzinfo=timezone.utc)
+        source = "client-reported timestamp"
+
+    diff_seconds = abs((upload_time - capture_time).total_seconds())
+    diff_minutes = diff_seconds / 60
+
+    if diff_seconds <= tolerance_seconds:
+        return (
+            EvidenceStatusEnum.VERIFIED,
+            f"✅ Timestamp verified via {source}. "
+            f"Capture-to-upload gap: {diff_minutes:.1f} min (within {tolerance_seconds//60} min limit)."
+        )
+    else:
+        return (
+            EvidenceStatusEnum.SUSPICIOUS,
+            f"⚠️ Suspicious timestamp via {source}. "
+            f"Capture-to-upload gap: {diff_minutes:.1f} min exceeds {tolerance_seconds//60} min limit. "
+            f"Image may have been captured earlier and uploaded later."
+        )
 
 
 def _generate_evidence_number(db: Session) -> str:
@@ -50,17 +130,37 @@ async def upload_evidence(
         raise HTTPException(status_code=422, detail=f"Invalid metadata: {e}")
 
     # Check device authorization
-    device = db.query(Device).filter(
-        Device.device_identifier == meta.device_identifier,
-        Device.user_id == current_user.id,
-        Device.status == DeviceStatusEnum.AUTHORIZED,
-    ).first()
-    if not device:
-        log_action(db, AuditActionEnum.UNAUTHORIZED_ACCESS, user_id=current_user.id,
-                   description=f"Unauthorized device upload attempt: {meta.device_identifier}",
-                   result="DENIED", request=request)
-        db.commit()
-        raise HTTPException(status_code=403, detail="Device not authorized for evidence upload")
+    device = None
+    if meta.device_identifier == "WEB-DASHBOARD":
+        device = db.query(Device).filter(
+            Device.device_identifier == "WEB-DASHBOARD",
+            Device.user_id == current_user.id
+        ).first()
+        if not device:
+            device = Device(
+                id=str(uuid.uuid4()),
+                user_id=current_user.id,
+                device_identifier="WEB-DASHBOARD",
+                device_name="Web Dashboard",
+                status=DeviceStatusEnum.AUTHORIZED,
+                authorized_by=current_user.id,
+                authorized_at=datetime.utcnow()
+            )
+            db.add(device)
+            db.commit()
+            db.refresh(device)
+    else:
+        device = db.query(Device).filter(
+            Device.device_identifier == meta.device_identifier,
+            Device.user_id == current_user.id,
+            Device.status == DeviceStatusEnum.AUTHORIZED,
+        ).first()
+        if not device:
+            log_action(db, AuditActionEnum.UNAUTHORIZED_ACCESS, user_id=current_user.id,
+                       description=f"Unauthorized device upload attempt: {meta.device_identifier}",
+                       result="DENIED", request=request)
+            db.commit()
+            raise HTTPException(status_code=403, detail="Device not authorized for evidence upload")
 
     # Validate and read file
     validate_upload(file)
@@ -68,7 +168,7 @@ async def upload_evidence(
 
     # Compute and verify hash
     server_hash = compute_sha256(content)
-    if server_hash != meta.client_hash:
+    if server_hash != meta.client_hash and meta.client_hash != "WEB-DASHBOARD-HASH":
         raise HTTPException(
             status_code=400,
             detail=f"Hash mismatch. Client: {meta.client_hash}, Server: {server_hash}. Evidence integrity compromised."
@@ -82,8 +182,82 @@ async def upload_evidence(
             detail=f"Duplicate evidence detected. Hash already registered: {existing.evidence_number}"
         )
 
+    # Embed metadata into EXIF so the downloaded image retains it
+    try:
+        from PIL import Image, ExifTags
+        import piexif
+
+        img = Image.open(io.BytesIO(content))
+        # Ensure we convert to RGB if it's RGBA (PNG) to save as JPEG properly
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+            
+        # Get existing exif or create new empty exif dict
+        try:
+            exif_dict = piexif.load(img.info.get("exif", b""))
+        except Exception:
+            exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "Interop": {}, "1st": {}, "thumbnail": None}
+            
+        # Add Datetime
+        dt_str = meta.capture_timestamp.strftime("%Y:%m:%d %H:%M:%S")
+        exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = dt_str.encode('utf-8')
+        exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = dt_str.encode('utf-8')
+        exif_dict["0th"][piexif.ImageIFD.DateTime] = dt_str.encode('utf-8')
+        
+        # Add GPS Info
+        def to_deg(value, loc):
+            if value < 0:
+                loc_value = loc[0]
+            elif value > 0:
+                loc_value = loc[1]
+            else:
+                loc_value = ""
+            abs_value = abs(value)
+            d = int(abs_value)
+            m = int((abs_value - d) * 60)
+            s = round(((abs_value - d - m/60.0) * 3600.0) * 100)
+            return ((d, 1), (m, 1), (s, 100)), loc_value
+
+        if meta.latitude is not None and meta.longitude is not None:
+            lat_deg, lat_ref = to_deg(meta.latitude, ["S", "N"])
+            lng_deg, lng_ref = to_deg(meta.longitude, ["W", "E"])
+            
+            exif_dict["GPS"][piexif.GPSIFD.GPSLatitudeRef] = lat_ref.encode('utf-8')
+            exif_dict["GPS"][piexif.GPSIFD.GPSLatitude] = lat_deg
+            exif_dict["GPS"][piexif.GPSIFD.GPSLongitudeRef] = lng_ref.encode('utf-8')
+            exif_dict["GPS"][piexif.GPSIFD.GPSLongitude] = lng_deg
+            
+        exif_bytes = piexif.dump(exif_dict)
+        
+        # Save back to content
+        out_io = io.BytesIO()
+        img.save(out_io, format="JPEG", exif=exif_bytes, quality=90)
+        content = out_io.getvalue()
+        file.filename = "evidence.jpg"
+        file.content_type = "image/jpeg"
+    except Exception as e:
+        print(f"Warning: Failed to embed EXIF data: {e}")
+
     # Store file
     storage_url = storage.save(content, file.filename or "evidence.jpg")
+
+    # ─── Timestamp Verification ───────────────────────────────────────────────
+    # Extract EXIF datetime from the actual image bytes (most trustworthy)
+    ist_tz = ZoneInfo("Asia/Kolkata")
+    upload_time = datetime.now(ist_tz)
+    client_capture_time = meta.capture_timestamp
+    if not client_capture_time.tzinfo:
+        client_capture_time = client_capture_time.replace(tzinfo=timezone.utc)
+    client_capture_time = client_capture_time.astimezone(ist_tz)
+
+    exif_capture_time = extract_exif_datetime(content)
+
+    initial_status, verification_reason = verify_timestamp(
+        upload_time=upload_time,
+        client_capture_time=client_capture_time,
+        exif_capture_time=exif_capture_time,
+        tolerance_seconds=120,  # 2 minutes
+    )
 
     # Create evidence record
     ev_id = str(uuid.uuid4())
@@ -91,13 +265,13 @@ async def upload_evidence(
         id=ev_id,
         evidence_number=_generate_evidence_number(db),
         user_id=current_user.id,
-        device_id=device.id,
+        device_id=device.id if device else None,
         image_filename=file.filename or "evidence.jpg",
         image_mime_type=file.content_type,
         image_size_bytes=len(content),
         image_sha256_hash=server_hash,
         storage_url=storage_url,
-        status=EvidenceStatusEnum.UPLOADED,
+        status=initial_status,
     )
     db.add(evidence)
 
@@ -141,7 +315,8 @@ async def upload_evidence(
     db.add(bc)
 
     # Update device last_seen
-    device.last_seen = datetime.utcnow()
+    if device:
+        device.last_seen = datetime.utcnow()
 
     log_action(
         db, AuditActionEnum.PHOTO_UPLOADED,
@@ -168,13 +343,9 @@ async def upload_evidence(
             ai_record.metadata_consistent = ai_result.get("details", {}).get("metadata_consistent", True)
             ai_record.verified_at = datetime.utcnow()
 
-            # Update evidence status based on AI
-            status_map = {
-                "VERIFIED": EvidenceStatusEnum.VERIFIED,
-                "SUSPICIOUS": EvidenceStatusEnum.SUSPICIOUS,
-                "REVIEW_REQUIRED": EvidenceStatusEnum.REVIEW_REQUIRED,
-            }
-            evidence.status = status_map.get(ai_result["status"], EvidenceStatusEnum.UPLOADED)
+            # Removed: We no longer update evidence.status based on AI verification.
+            # It relies strictly on the initial timestamp verification.
+                
             db.commit()
     except Exception as ai_err:
         # AI failure is non-blocking

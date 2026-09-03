@@ -1,10 +1,11 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import krLogo from '../kr-logo.png'
 import { getInitials } from '../utils/helpers'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Map, Image, Users, Cpu, Blocks,
-  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse
+  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse, Thermometer, Plane
 } from 'lucide-react'
 
 const navItems = [
@@ -14,19 +15,21 @@ const navItems = [
     { to: '/evidence', label: 'Evidence', icon: Image },
   ]},
   { group: 'Management', items: [
-    { to: '/users', label: 'Users', icon: Users },
-    { to: '/devices', label: 'Devices', icon: Smartphone },
+    { to: '/users', label: 'Users', icon: Users, adminOnly: true },
+    { to: '/devices', label: 'Devices', icon: Smartphone, adminOnly: true },
+    { to: '/drone', label: 'Drone', icon: Plane },
   ]},
   { group: 'Verification', items: [
     { to: '/ai-verification', label: 'AI Verification', icon: Cpu },
     { to: '/egg-counter', label: 'Egg Counter', icon: CheckSquare },
     { to: '/egg-ai-chat', label: 'AI Vision Chat', icon: MessageCircle },
     { to: '/hen-health', label: 'Hen Health', icon: HeartPulse },
+    { to: '/thermal-camera', label: 'Thermal Camera', icon: Thermometer },
     { to: '/blockchain', label: 'Blockchain', icon: Blocks },
   ]},
   { group: 'Records', items: [
-    { to: '/audit-logs', label: 'Audit Logs', icon: ClipboardList },
-    { to: '/reports', label: 'Reports', icon: BarChart2 },
+    { to: '/audit-logs', label: 'Audit Logs', icon: ClipboardList, adminOnly: true },
+    { to: '/reports', label: 'Reports', icon: BarChart2, adminOnly: true },
     { to: '/settings', label: 'Settings', icon: Settings },
   ]},
 ]
@@ -46,6 +49,8 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
     i18n.changeLanguage(newLang)
   }
 
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'DEPT_ADMIN'
+
   return (
     <>
       <div 
@@ -55,7 +60,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <div className="sidebar-logo-mark">
-            <img src="https://img.sanishtech.com/u/e4981fe5381a1990b40fb04b81c7173d.png" alt="KR Group Logo" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
+            <img src={krLogo} alt="KR Group Logo" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
             <div className="sidebar-logo-text" style={{ marginLeft: '10px' }}>
               <span className="sidebar-logo-name">KR Group</span>
               <span className="sidebar-logo-sub">POULTRY</span>
@@ -64,23 +69,27 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
         </div>
 
         <nav className="sidebar-nav">
-          {navItems.map(group => (
-            <div key={group.group}>
-              <div className="sidebar-section-label">{t(`sidebar.groups.${group.group}`)}</div>
-              {group.items.map(item => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === '/'}
-                  onClick={onClose}
-                  className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-                >
-                  <item.icon size={16} className="nav-icon" />
-                  {t(`sidebar.items.${item.label}`)}
-                </NavLink>
-              ))}
-            </div>
-          ))}
+          {navItems.map(group => {
+            const filteredItems = group.items.filter(item => !item.adminOnly || isAdmin)
+            if (filteredItems.length === 0) return null
+            return (
+              <div key={group.group}>
+                <div className="sidebar-section-label">{t(`sidebar.groups.${group.group}`)}</div>
+                {filteredItems.map(item => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/'}
+                    onClick={onClose}
+                    className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+                  >
+                    <item.icon size={16} className="nav-icon" />
+                    {t(`sidebar.items.${item.label}`)}
+                  </NavLink>
+                ))}
+              </div>
+            )
+          })}
         </nav>
 
         <div className="sidebar-user">

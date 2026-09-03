@@ -16,6 +16,8 @@ import SettingsPage from './pages/SettingsPage'
 import EggCounterPage from './pages/EggCounterPage'
 import EggAIChatPage from './pages/EggAIChatPage'
 import HenHealthPage from './pages/HenHealthPage'
+import ThermalCameraPage from './pages/ThermalCameraPage'
+import DronePage from './pages/DronePage'
 
 export default function App() {
   return (
@@ -33,6 +35,8 @@ export default function App() {
           <Route path="/egg-counter"     element={<EggCounterPage />} />
           <Route path="/egg-ai-chat"    element={<EggAIChatPage />} />
           <Route path="/hen-health"     element={<HenHealthPage />} />
+          <Route path="/thermal-camera"  element={<ThermalCameraPage />} />
+          <Route path="/drone"           element={<DronePage />} />
           <Route path="/blockchain"      element={<BlockchainPage />} />
           <Route path="/audit-logs"      element={<AuditLogsPage />} />
           <Route path="/reports"         element={<ReportsPage />} />

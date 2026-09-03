@@ -3,7 +3,7 @@
  */
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || ''
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -108,6 +108,9 @@ export const aiApi = {
   analyzeEggImage: (formData: FormData) => api.post('/api/ai/analyze-egg-image', formData),
   /** OpenAI Chat: POST /api/ai/chat-analyze */
   chatAnalyze: (formData: FormData) => api.post('/api/ai/chat-analyze', formData),
+  /** Thermal Analyze: POST /api/ai/thermal-analyze */
+  thermalAnalyze: (formData: FormData) => api.post('/api/ai/thermal-analyze', formData),
+  thermalAnalyzeVideo: (formData: FormData) => api.post('/api/ai/thermal-analyze', formData, { responseType: 'blob' }),
 }
 
 // ─── Blockchain ───────────────────────────────────────────────────────────────

@@ -59,10 +59,10 @@ class OpenCVVerifier(BaseVerifier):
     MODEL_VERSION = "opencv-v1.0"
 
     # Thresholds (tunable without model retraining)
-    ELA_SUSPICIOUS_THRESHOLD = 0.35
-    ELA_REVIEW_THRESHOLD = 0.20
-    NOISE_SUSPICIOUS_THRESHOLD = 0.45
-    NOISE_REVIEW_THRESHOLD = 0.25
+    ELA_SUSPICIOUS_THRESHOLD = 0.60
+    ELA_REVIEW_THRESHOLD = 0.40
+    NOISE_SUSPICIOUS_THRESHOLD = 0.80
+    NOISE_REVIEW_THRESHOLD = 0.50
 
     def _validate_image(self, image_bytes: bytes) -> Optional[str]:
         """Return error string if image is invalid, else None."""
@@ -101,50 +101,49 @@ class OpenCVVerifier(BaseVerifier):
         # Step 3: Noise analysis
         noise_result = perform_noise_analysis(image_bytes)
         noise_score = noise_result.get("noise_score", 0.0)
+        
+        # Step 4: Screen Recapture analysis via LLM (GPT-4o)
+        from app.ai.llm_authenticity_checker import check_image_authenticity
+        llm_result = check_image_authenticity(image_bytes)
+        is_screen = llm_result.get("is_screen_recapture", False)
+        llm_confidence = llm_result.get("confidence", 0.0)
+        llm_reason = llm_result.get("reason", "")
 
-        # Step 4: Aggregate scores (weighted)
-        ela_weight = 0.6
-        noise_weight = 0.4
-        combined_score = ela_score * ela_weight + noise_score * noise_weight
+        # Step 5: Aggregate scores (kept for backwards compatibility of metadata)
+        combined_score = (ela_score * 0.5) + (noise_score * 0.5)
 
-        # Step 5: Determine status
-        if combined_score >= self.ELA_SUSPICIOUS_THRESHOLD or noise_score >= self.NOISE_SUSPICIOUS_THRESHOLD:
+        # Step 6: Determine status
+        # Only use Screen Recapture from LLM to flag as SUSPICIOUS based on user feedback.
+        # ELA and Noise are kept for metadata but do not trigger SUSPICIOUS status.
+        if is_screen:
             status = "SUSPICIOUS"
             message = (
-                "AI-assisted verification: Potential image manipulation detected. "
-                "Anomalous compression artifacts and/or noise patterns identified. "
-                "Manual review by a qualified examiner is strongly recommended."
+                "AI-assisted verification: Screen Recapture Detected! "
+                f"The AI determined this is a photo of a screen rather than a live photo. Reason: {llm_reason}"
             )
-            confidence = min(0.95, 0.5 + combined_score * 0.5)
-        elif combined_score >= self.ELA_REVIEW_THRESHOLD or noise_score >= self.NOISE_REVIEW_THRESHOLD:
-            status = "REVIEW_REQUIRED"
-            message = (
-                "AI-assisted verification: Inconclusive analysis. "
-                "Some anomalies detected that require human review. "
-                "Cannot confirm or deny manipulation."
-            )
-            confidence = min(0.80, 0.4 + combined_score * 0.4)
+            confidence = max(0.9, llm_confidence)
+            tamper_probability = max(0.7, llm_confidence)
         else:
             status = "VERIFIED"
             message = (
-                "AI-assisted verification: No significant manipulation indicators detected. "
-                "Image compression artifacts and noise patterns appear consistent with "
-                "unmodified camera output. Note: This is a heuristic analysis, not cryptographic proof."
+                "AI-assisted verification: Original Live Photo. "
+                "No screen recapture (Moiré patterns) or significant manipulation indicators detected."
             )
-            confidence = min(0.95, 0.7 + (1 - combined_score) * 0.25)
+            confidence = 0.95
+            tamper_probability = combined_score
 
         return {
             "status": status,
-            "tamper_probability": round(combined_score, 4),
+            "tamper_probability": round(tamper_probability, 4),
             "confidence": round(confidence, 4),
             "message": message,
             "details": {
                 "ela_score": ela_score,
                 "noise_score": noise_score,
+                "llm_is_screen": is_screen,
+                "llm_confidence": llm_confidence,
+                "llm_reason": llm_reason,
                 "combined_score": round(combined_score, 4),
-                "ela_details": ela_result,
-                "noise_details": noise_result,
-                "metadata_consistent": True,
                 "model_version": self.MODEL_VERSION,
             },
         }

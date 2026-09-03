@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import krLogo from '../kr-logo.png'
 import toast from 'react-hot-toast'
 import { Eye, EyeOff, Lock, Mail, Map, Shield, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -57,7 +58,7 @@ export default function LoginPage() {
         </div>
         <div className="auth-illustration-content">
           <div className="auth-brand-badge">
-            <img src="https://img.sanishtech.com/u/e4981fe5381a1990b40fb04b81c7173d.png" alt="KR Group Logo" style={{ height: '32px', width: 'auto', objectFit: 'contain', marginRight: '8px' }} />
+            <img src={krLogo} alt="KR Group Logo" style={{ height: '32px', width: 'auto', objectFit: 'contain', marginRight: '8px' }} />
             <span>KR Group POULTRY</span>
           </div>
           <h1 className="auth-hero-title">

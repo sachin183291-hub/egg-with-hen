@@ -4,15 +4,20 @@
 import type { EvidenceStatus, AIStatus, BlockchainStatus, DeviceStatus } from '../types'
 
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric', month: 'short', day: 'numeric'
+  const utcIso = iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`;
+  return new Date(utcIso).toLocaleDateString('en-IN', {
+    year: 'numeric', month: 'short', day: 'numeric',
+    timeZone: 'Asia/Kolkata',
   })
 }
 
 export function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
+  const utcIso = iso.endsWith('Z') || iso.includes('+') ? iso : `${iso}Z`;
+  return new Date(utcIso).toLocaleString('en-IN', {
     year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZone: 'Asia/Kolkata',
+    hour12: true,
   })
 }
 

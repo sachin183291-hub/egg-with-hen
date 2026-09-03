@@ -8,7 +8,7 @@ import '../models/evidence.dart';
 class ApiService {
   static const String _baseUrl = String.fromEnvironment(
     'API_URL',
-    defaultValue: 'http://10.0.2.2:8000', // Android emulator → host localhost
+    defaultValue: 'http://10.191.248.237:8000', // Local WiFi IP for physical mobile testing
   );
 
   static const FlutterSecureStorage _storage = FlutterSecureStorage();

@@ -62,7 +62,7 @@ export default function HenHealthPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
         {/* Upload & Preview Section */}
-        <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px', background: 'var(--card-bg)' }}>
+        <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Camera size={20} className="text-brand" /> Image Capture
           </h3>
@@ -117,7 +117,7 @@ export default function HenHealthPage() {
         </div>
 
         {/* Results Section */}
-        <div className="card" style={{ padding: '24px', background: 'var(--card-bg)', position: 'relative', overflow: 'hidden' }}>
+        <div className="card" style={{ padding: '24px', position: 'relative', overflow: 'hidden' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
             <Activity size={20} className="text-brand" /> Diagnostic Report
           </h3>

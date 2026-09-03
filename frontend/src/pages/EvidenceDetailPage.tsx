@@ -230,7 +230,7 @@ export default function EvidenceDetailPage() {
               </div>
               <div className="detail-item">
                 <span className="detail-label">Timezone</span>
-                <span className="detail-value">{meta?.timezone ?? '—'}</span>
+                <span className="detail-value">IST (Asia/Kolkata, UTC+5:30)</span>
               </div>
             </div>
           </div>

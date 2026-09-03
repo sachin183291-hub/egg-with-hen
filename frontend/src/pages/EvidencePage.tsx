@@ -6,7 +6,8 @@ import {
   formatDateTime, formatBytes, evidenceStatusBadgeClass,
   aiStatusBadgeClass, truncateHash
 } from '../utils/helpers'
-import { Search, Eye, Trash2, Filter, RefreshCw } from 'lucide-react'
+import { Search, Eye, Trash2, Filter, RefreshCw, Upload } from 'lucide-react'
+import UploadEvidenceModal from '../components/UploadEvidenceModal'
 import toast from 'react-hot-toast'
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -26,6 +27,7 @@ export default function EvidencePage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
+  const [showUploadModal, setShowUploadModal] = useState(false)
 
   const fetchData = useCallback(() => {
     setLoading(true)
@@ -58,9 +60,14 @@ export default function EvidencePage() {
           <h1 className="page-title">Evidence Records</h1>
           <p className="page-subtitle">{data?.total ?? 0} total records</p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={fetchData}>
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowUploadModal(true)}>
+            <Upload size={14} /> Upload Evidence
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={fetchData}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="filters-bar">
@@ -162,6 +169,15 @@ export default function EvidencePage() {
           </div>
         )}
       </div>
+      {showUploadModal && (
+        <UploadEvidenceModal
+          onClose={() => setShowUploadModal(false)}
+          onSuccess={() => {
+            setShowUploadModal(false)
+            fetchData()
+          }}
+        />
+      )}
     </div>
   )
 }

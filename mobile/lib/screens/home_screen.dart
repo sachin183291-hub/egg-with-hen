@@ -1,4 +1,4 @@
-import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:geolocator/geolocator.dart';
@@ -33,7 +33,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   Future<void> _loadStats() async {
     final pending = await LocalDatabase.countPending();
-    final total = await LocalDatabase.countTotal();
     setState(() { _pendingCount = pending; });
 
     try {
@@ -69,8 +68,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final user = auth.user;
+    context.watch<AuthProvider>();
 
     final tabs = [
       _HomeTab(cameras: widget.cameras, onCapture: _loadStats),
@@ -136,6 +134,7 @@ class _HomeTabState extends State<_HomeTab> {
   String _gpsStatus = 'Getting GPS...';
   String? _statusMessage;
   bool _success = false;
+  String? _verificationStatus; // 'VERIFIED', 'SUSPICIOUS', null
 
   @override
   void initState() {
@@ -180,7 +179,12 @@ class _HomeTabState extends State<_HomeTab> {
 
   Future<void> _capture() async {
     if (_controller == null || !_isInitialized || _capturing || _position == null) return;
-    setState(() { _capturing = true; _statusMessage = null; _success = false; });
+    setState(() {
+      _capturing = true;
+      _statusMessage = null;
+      _success = false;
+      _verificationStatus = null;
+    });
 
     try {
       final auth = context.read<AuthProvider>();
@@ -195,7 +199,7 @@ class _HomeTabState extends State<_HomeTab> {
       );
 
       setState(() {
-        _statusMessage = '✅ Captured: ${evidence.evidenceNumber}\nHash: ${evidence.imageSha256Hash.substring(0, 16)}...';
+        _statusMessage = '✅ Captured: ${evidence.evidenceNumber}\nApplied geo-stamp. Uploading...';
         _success = true;
       });
 
@@ -204,16 +208,28 @@ class _HomeTabState extends State<_HomeTab> {
       // Try immediate sync
       final result = await EvidenceService.syncEvidence(evidence);
       if (mounted) {
-        setState(() {
-          _statusMessage = result.success
-            ? '✅ ${evidence.evidenceNumber} captured & uploaded!'
-            : '✅ ${evidence.evidenceNumber} captured (offline — will sync later)';
-        });
+        if (result.success) {
+          // Parse verification status from sync result
+          final uploadedStatus = result.serverStatus ?? 'UPLOADED';
+          setState(() {
+            _verificationStatus = uploadedStatus;
+            _statusMessage = uploadedStatus == 'VERIFIED'
+              ? '✅ ${evidence.evidenceNumber} — VERIFIED ✅\nTimestamp matches! Evidence is authentic.'
+              : uploadedStatus == 'SUSPICIOUS'
+              ? '⚠️ ${evidence.evidenceNumber} — SUSPICIOUS ⚠️\nTimestamp gap too large. Flagged for review.'
+              : '✅ ${evidence.evidenceNumber} uploaded successfully!';
+          });
+        } else {
+          setState(() {
+            _statusMessage = '✅ ${evidence.evidenceNumber} captured (offline — will sync later)';
+          });
+        }
       }
     } catch (e) {
       setState(() {
         _statusMessage = '❌ Capture failed: $e';
         _success = false;
+        _verificationStatus = null;
       });
     } finally {
       if (mounted) setState(() => _capturing = false);
@@ -297,11 +313,62 @@ class _HomeTabState extends State<_HomeTab> {
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _success ? const Color(0xFF10B981).withOpacity(0.1) : const Color(0xFFEF4444).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _success ? const Color(0xFF10B981).withOpacity(0.3) : const Color(0xFFEF4444).withOpacity(0.3)),
+                color: _verificationStatus == 'VERIFIED'
+                  ? const Color(0xFF10B981).withOpacity(0.12)
+                  : _verificationStatus == 'SUSPICIOUS'
+                  ? const Color(0xFFEF4444).withOpacity(0.12)
+                  : _success
+                  ? const Color(0xFF10B981).withOpacity(0.1)
+                  : const Color(0xFFEF4444).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _verificationStatus == 'VERIFIED'
+                    ? const Color(0xFF10B981).withOpacity(0.5)
+                    : _verificationStatus == 'SUSPICIOUS'
+                    ? const Color(0xFFEF4444).withOpacity(0.5)
+                    : _success
+                    ? const Color(0xFF10B981).withOpacity(0.3)
+                    : const Color(0xFFEF4444).withOpacity(0.3),
+                ),
               ),
-              child: Text(_statusMessage!, style: TextStyle(fontSize: 12, color: _success ? const Color(0xFF10B981) : const Color(0xFFEF4444))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_verificationStatus != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _verificationStatus == 'VERIFIED'
+                          ? const Color(0xFF10B981)
+                          : const Color(0xFFEF4444),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _verificationStatus == 'VERIFIED' ? '✅  VERIFIED' : '⚠️  SUSPICIOUS',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                  Text(
+                    _statusMessage!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _verificationStatus == 'VERIFIED'
+                        ? const Color(0xFF10B981)
+                        : _verificationStatus == 'SUSPICIOUS'
+                        ? const Color(0xFFEF4444)
+                        : _success
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFEF4444),
+                    ),
+                  ),
+                ],
+              ),
             ),
 
           // Capture Button

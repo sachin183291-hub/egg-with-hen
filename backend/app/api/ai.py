@@ -506,3 +506,48 @@ async def chat_analyze(
         analysis=result.get("analysis"),
     )
 
+@router.post("/thermal-analyze", tags=["Thermal Analysis"])
+async def thermal_analyze(
+    image: UploadFile = File(..., description="Image or video frame for thermal analysis"),
+    min_temp: float = Form(20.0),
+    max_temp: float = Form(40.0),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    POST /api/ai/thermal-analyze
+    Simulates thermal camera detection for hens within a specific temperature range.
+    """
+    try:
+        from fastapi.responses import FileResponse, JSONResponse
+        import json
+        
+        image_bytes = await image.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+            
+        content_type = image.content_type or ""
+        is_video = "video" in content_type or image.filename.endswith((".mp4", ".avi", ".mov", ".webm"))
+            
+        from app.ai.thermal_service import process_thermal_image, process_thermal_video
+        
+        if is_video:
+            result = process_thermal_video(image_bytes, min_temp, max_temp)
+            # We return the video file directly, but pass the count in headers
+            headers = {
+                "X-Hen-Count": str(result["hen_count"]),
+                "Access-Control-Expose-Headers": "X-Hen-Count"
+            }
+            return FileResponse(
+                path=result["video_path"], 
+                media_type="video/mp4", 
+                filename="thermal_output.mp4",
+                headers=headers
+            )
+        else:
+            result = process_thermal_image(image_bytes, min_temp, max_temp)
+            return result
+            
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error processing thermal media: {str(exc)}")

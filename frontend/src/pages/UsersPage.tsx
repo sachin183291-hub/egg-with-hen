@@ -4,6 +4,7 @@ import type { User, PaginatedResponse } from '../types'
 import { formatDateTime, getInitials } from '../utils/helpers'
 import { Search, UserPlus, Edit2, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import CreateUserModal from '../components/CreateUserModal'
 
 const ROLE_COLORS: Record<string, string> = {
   SUPER_ADMIN: 'badge badge-suspicious',
@@ -115,6 +116,16 @@ export default function UsersPage() {
           </table>
         </div>
       </div>
+
+      {showCreate && (
+        <CreateUserModal
+          onClose={() => setShowCreate(false)}
+          onSuccess={() => {
+            setShowCreate(false)
+            fetchData()
+          }}
+        />
+      )}
     </div>
   )
 }
