@@ -40,14 +40,16 @@ class GioTagApp extends StatelessWidget {
           primary: Color(0xFF6366F1),
           secondary: Color(0xFF818CF8),
           surface: Color(0xFF1A2235),
-          background: Color(0xFF0A0E1A),
         ),
         fontFamily: 'Inter',
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF111827),
           elevation: 0,
           iconTheme: IconThemeData(color: Color(0xFF94A3B8)),
-          titleTextStyle: TextStyle(color: Color(0xFFF1F5F9), fontSize: 18, fontWeight: FontWeight.w700),
+          titleTextStyle: TextStyle(
+              color: Color(0xFFF1F5F9),
+              fontSize: 18,
+              fontWeight: FontWeight.w700),
         ),
       ),
       home: Consumer<AuthProvider>(
@@ -63,7 +65,11 @@ class GioTagApp extends StatelessWidget {
                     SizedBox(height: 16),
                     CircularProgressIndicator(color: Color(0xFF6366F1)),
                     SizedBox(height: 12),
-                    Text('GioTag', style: TextStyle(color: Color(0xFFF1F5F9), fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text('GioTag',
+                        style: TextStyle(
+                            color: Color(0xFFF1F5F9),
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -71,8 +77,8 @@ class GioTagApp extends StatelessWidget {
           }
 
           return auth.isAuthenticated
-            ? HomeScreen(cameras: cameras)
-            : const LoginScreen();
+              ? HomeScreen(cameras: cameras)
+              : const LoginScreen();
         },
       ),
     );

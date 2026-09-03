@@ -131,15 +131,16 @@ async def upload_evidence(
     # Check device authorization
     device = None
     if meta.device_identifier == "WEB-DASHBOARD":
+        web_device_id = f"WEB-DASHBOARD-{current_user.id}"
         device = db.query(Device).filter(
-            Device.device_identifier == "WEB-DASHBOARD",
+            Device.device_identifier == web_device_id,
             Device.user_id == current_user.id
         ).first()
         if not device:
             device = Device(
                 id=str(uuid.uuid4()),
                 user_id=current_user.id,
-                device_identifier="WEB-DASHBOARD",
+                device_identifier=web_device_id,
                 device_name="Web Dashboard",
                 status=DeviceStatusEnum.AUTHORIZED,
                 authorized_by=current_user.id,
