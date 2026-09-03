@@ -8,10 +8,8 @@ import io
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional
-# pyrefly: ignore [missing-import]
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
-
 from app.database.session import get_db
 from app.database.models import (
     User, Device, Evidence, EvidenceMetadata, AIVerification,
@@ -115,6 +113,7 @@ async def upload_evidence(
     request: Request,
     file: UploadFile = File(...),
     metadata_json: str = Form(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -328,28 +327,30 @@ async def upload_evidence(
     db.commit()
     db.refresh(evidence)
 
-    # Trigger AI verification asynchronously (best-effort)
-    try:
-        from app.ai.verifier import verify_image_content
-        ai_result = verify_image_content(content)
-        ai_record = db.query(AIVerification).filter(AIVerification.evidence_id == ev_id).first()
-        if ai_record:
-            ai_record.status = AIStatusEnum[ai_result["status"]]
-            ai_record.tamper_probability = ai_result["tamper_probability"]
-            ai_record.confidence_score = ai_result["confidence"]
-            ai_record.verification_message = ai_result["message"]
-            ai_record.ela_score = ai_result.get("details", {}).get("ela_score")
-            ai_record.noise_score = ai_result.get("details", {}).get("noise_score")
-            ai_record.metadata_consistent = ai_result.get("details", {}).get("metadata_consistent", True)
-            ai_record.verified_at = datetime.utcnow()
+    def _run_ai_verification(evidence_id: str, image_bytes: bytes):
+        # We need a fresh DB session for the background task
+        from app.database.session import SessionLocal
+        bg_db = SessionLocal()
+        try:
+            from app.ai.verifier import verify_image_content
+            ai_result = verify_image_content(image_bytes)
+            ai_record = bg_db.query(AIVerification).filter(AIVerification.evidence_id == evidence_id).first()
+            if ai_record:
+                ai_record.status = AIStatusEnum[ai_result["status"]]
+                ai_record.tamper_probability = ai_result["tamper_probability"]
+                ai_record.confidence_score = ai_result["confidence"]
+                ai_record.verification_message = ai_result["message"]
+                ai_record.ela_score = ai_result.get("details", {}).get("ela_score")
+                ai_record.noise_score = ai_result.get("details", {}).get("noise_score")
+                ai_record.metadata_consistent = ai_result.get("details", {}).get("metadata_consistent", True)
+                ai_record.verified_at = datetime.utcnow()
+                bg_db.commit()
+        except Exception as ai_err:
+            pass
+        finally:
+            bg_db.close()
 
-            # Removed: We no longer update evidence.status based on AI verification.
-            # It relies strictly on the initial timestamp verification.
-                
-            db.commit()
-    except Exception as ai_err:
-        # AI failure is non-blocking
-        pass
+    background_tasks.add_task(_run_ai_verification, ev_id, content)
 
     db.refresh(evidence)
     return evidence
