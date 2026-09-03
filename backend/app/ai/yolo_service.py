@@ -3,14 +3,13 @@ import cv2
 import numpy as np
 import base64
 # pyrefly: ignore [missing-import]
-from ultralytics import YOLO, YOLOWorld
+from ultralytics import YOLO
 
 # Global model instances
 model = None
 tray_model = None
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "egg_detector.pt")
 ALT_MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../models/best.pt"))
-FALLBACK_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "yolov8s-world.pt")
 
 def load_model():
     global model
@@ -24,18 +23,9 @@ def load_model():
                 print(f"Loading custom model from {ALT_MODEL_PATH}")
                 model = YOLO(ALT_MODEL_PATH)
             else:
-                print(f"Custom model not found. Using zero-shot YOLO-World to detect 'egg tray' and 'hen'.")
-                model = YOLOWorld(FALLBACK_MODEL_PATH if os.path.exists(FALLBACK_MODEL_PATH) else "yolov8s-world.pt") 
-                model.set_classes(["egg tray", "hen"])
+                print(f"Custom model not found. Using standard YOLOv8n as fallback.")
+                model = YOLO("yolov8n.pt") 
                 return model, None
-                
-            # Check if custom model has tray class
-            has_tray = any("tray" in name.lower() for name in model.names.values())
-            if not has_tray:
-                print("Custom model lacks 'tray' class. Loading YOLO-World for trays and hens.")
-                tray_model = YOLOWorld(FALLBACK_MODEL_PATH if os.path.exists(FALLBACK_MODEL_PATH) else "yolov8s-world.pt")
-                tray_model.set_classes(["egg tray", "hen"])
-                
         except Exception as e:
             print(f"Error loading model: {e}")
             raise e
