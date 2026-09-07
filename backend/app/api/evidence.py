@@ -299,6 +299,11 @@ async def upload_evidence(
     from app.ai.verifier import verify_image_content
     try:
         ai_result = verify_image_content(content)
+        
+        # If AI detects screen recapture or tampering, override the timestamp verification status
+        if ai_result.get("status") == "SUSPICIOUS":
+            evidence.status = EvidenceStatusEnum.SUSPICIOUS
+            
         ai = AIVerification(
             id=str(uuid.uuid4()),
             evidence_id=ev_id,
