@@ -60,7 +60,7 @@ def verify_timestamp(
     upload_time: datetime,
     client_capture_time: datetime,
     exif_capture_time: Optional[datetime],
-    tolerance_seconds: int = 120,
+    tolerance_seconds: int = 180,
 ) -> tuple[EvidenceStatusEnum, str]:
     """
     Compare image capture time vs upload time.
@@ -70,8 +70,8 @@ def verify_timestamp(
       2. Client-sent capture_timestamp (fallback if no EXIF)
 
     Rules:
-      - Difference <= 2 minutes → VERIFIED ✅
-      - Difference >  2 minutes → SUSPICIOUS ⚠️
+      - Difference <= 3 minutes → VERIFIED ✅
+      - Difference >  3 minutes → SUSPICIOUS ⚠️
 
     Returns: (status, reason_message)
     """
@@ -256,7 +256,7 @@ async def upload_evidence(
         upload_time=upload_time,
         client_capture_time=client_capture_time,
         exif_capture_time=exif_capture_time,
-        tolerance_seconds=120,  # 2 minutes
+        tolerance_seconds=180,  # 3 minutes
     )
 
     # Create evidence record
@@ -295,13 +295,29 @@ async def upload_evidence(
     )
     db.add(evidence_meta)
 
-    # AI verification placeholder (triggered async)
-    ai = AIVerification(
-        id=str(uuid.uuid4()),
-        evidence_id=ev_id,
-        status=AIStatusEnum.PENDING,
-        verification_message="Queued for AI-assisted verification",
-    )
+    # AI Verification (Synchronous / Immediate)
+    from app.ai.verifier import verify_image_content
+    try:
+        ai_result = verify_image_content(content)
+        ai = AIVerification(
+            id=str(uuid.uuid4()),
+            evidence_id=ev_id,
+            status=AIStatusEnum[ai_result["status"]],
+            tamper_probability=ai_result["tamper_probability"],
+            confidence_score=ai_result["confidence"],
+            verification_message=ai_result["message"],
+            ela_score=ai_result.get("details", {}).get("ela_score"),
+            noise_score=ai_result.get("details", {}).get("noise_score"),
+            metadata_consistent=ai_result.get("details", {}).get("metadata_consistent", True),
+            verified_at=datetime.utcnow()
+        )
+    except Exception as e:
+        ai = AIVerification(
+            id=str(uuid.uuid4()),
+            evidence_id=ev_id,
+            status=AIStatusEnum.PENDING,
+            verification_message=f"AI verification failed during upload: {e}",
+        )
     db.add(ai)
 
     # Blockchain placeholder
@@ -328,32 +344,6 @@ async def upload_evidence(
     db.commit()
     db.refresh(evidence)
 
-    def _run_ai_verification(evidence_id: str, image_bytes: bytes):
-        # We need a fresh DB session for the background task
-        from app.database.session import SessionLocal
-        bg_db = SessionLocal()
-        try:
-            from app.ai.verifier import verify_image_content
-            ai_result = verify_image_content(image_bytes)
-            ai_record = bg_db.query(AIVerification).filter(AIVerification.evidence_id == evidence_id).first()
-            if ai_record:
-                ai_record.status = AIStatusEnum[ai_result["status"]]
-                ai_record.tamper_probability = ai_result["tamper_probability"]
-                ai_record.confidence_score = ai_result["confidence"]
-                ai_record.verification_message = ai_result["message"]
-                ai_record.ela_score = ai_result.get("details", {}).get("ela_score")
-                ai_record.noise_score = ai_result.get("details", {}).get("noise_score")
-                ai_record.metadata_consistent = ai_result.get("details", {}).get("metadata_consistent", True)
-                ai_record.verified_at = datetime.utcnow()
-                bg_db.commit()
-        except Exception as ai_err:
-            pass
-        finally:
-            bg_db.close()
-
-    background_tasks.add_task(_run_ai_verification, ev_id, content)
-
-    db.refresh(evidence)
     return evidence
 
 
