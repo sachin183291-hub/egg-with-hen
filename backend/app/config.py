@@ -76,3 +76,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+# force reload
