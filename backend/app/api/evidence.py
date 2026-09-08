@@ -398,8 +398,8 @@ async def list_evidence(
 ):
     q = db.query(Evidence).filter(Evidence.deleted_at == None)
 
-    # Field officers only see their own evidence
-    if current_user.role == RoleEnum.FIELD_OFFICER:
+    # Field officers and viewers only see their own evidence
+    if current_user.role in (RoleEnum.FIELD_OFFICER, RoleEnum.VIEWER):
         q = q.filter(Evidence.user_id == current_user.id)
     elif user_id_filter:
         q = q.filter(Evidence.user_id == user_id_filter)
@@ -435,7 +435,7 @@ async def get_evidence(
         raise HTTPException(status_code=404, detail="Evidence not found")
 
     # Access control
-    if current_user.role == RoleEnum.FIELD_OFFICER and ev.user_id != current_user.id:
+    if current_user.role in (RoleEnum.FIELD_OFFICER, RoleEnum.VIEWER) and ev.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     log_action(

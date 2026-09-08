@@ -14,7 +14,7 @@ export default function EvidenceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const isFieldOfficer = user?.role === 'FIELD_OFFICER'
+  const isRestrictedRole = user?.role === 'FIELD_OFFICER' || user?.role === 'VIEWER'
   const [evidence, setEvidence] = useState<Evidence | null>(null)
   const [loading, setLoading] = useState(true)
   const [aiLoading, setAiLoading] = useState(false)
@@ -170,7 +170,7 @@ export default function EvidenceDetailPage() {
             <p className="page-subtitle">Evidence Detail</p>
           </div>
         </div>
-        {!isFieldOfficer && (
+        {!isRestrictedRole && (
           <span className={evidenceStatusBadgeClass(evidence.status)} style={{ fontSize:'0.85rem', padding:'5px 14px' }}>
             {evidence.status.replace('_', ' ')}
           </span>
@@ -214,7 +214,7 @@ export default function EvidenceDetailPage() {
           </div>
 
           {/* Actions */}
-          {!isFieldOfficer && (
+          {!isRestrictedRole && (
             <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop:12 }}>
               <button className="btn btn-secondary" onClick={runAIVerify} disabled={aiLoading}>
                 <Cpu size={15} />
@@ -309,7 +309,7 @@ export default function EvidenceDetailPage() {
           </div>
 
           {/* AI Verification */}
-          {!isFieldOfficer && (
+          {!isRestrictedRole && (
             <div className="card">
               <div className="card-header">
                 <h3 className="card-title"><Cpu size={16} style={{ verticalAlign:'middle', marginRight:6 }} />AI Verification</h3>
