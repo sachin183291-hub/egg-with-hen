@@ -8,6 +8,7 @@ import {
 } from '../utils/helpers'
 import { Search, Eye, Trash2, Filter, RefreshCw, Upload } from 'lucide-react'
 import UploadEvidenceModal from '../components/UploadEvidenceModal'
+import { useAuth } from '../hooks/useAuth'
 import toast from 'react-hot-toast'
 
 const STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -22,6 +23,10 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
 
 export default function EvidencePage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isFieldOfficer = user?.role === 'FIELD_OFFICER'
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'DEPT_ADMIN'
+
   const [data, setData] = useState<PaginatedResponse<Evidence> | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -80,10 +85,12 @@ export default function EvidencePage() {
             onChange={e => { setSearch(e.target.value); setPage(1) }}
           />
         </div>
-        <select className="form-select" style={{ width:180 }}
-          value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}>
-          {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        {!isFieldOfficer && (
+          <select className="form-select" style={{ width:180 }}
+            value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}>
+            {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="card" style={{ padding:0 }}>
@@ -92,24 +99,24 @@ export default function EvidencePage() {
             <thead>
               <tr>
                 <th>Evidence #</th>
-                <th>Status</th>
+                {!isFieldOfficer && <th>Status</th>}
                 <th>Officer</th>
                 <th>Captured</th>
                 <th>Size</th>
                 <th>Hash</th>
-                <th>AI</th>
+                {!isFieldOfficer && <th>AI</th>}
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>
+                <tr><td colSpan={isFieldOfficer ? 6 : 8} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
                     <div className="spinner" /> Loading...
                   </div>
                 </td></tr>
               ) : !data?.items.length ? (
-                <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>
+                <tr><td colSpan={isFieldOfficer ? 6 : 8} style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>
                   No evidence found
                 </td></tr>
               ) : data.items.map(ev => (
@@ -119,30 +126,32 @@ export default function EvidencePage() {
                       {ev.evidence_number}
                     </span>
                   </td>
-                  <td><span className={evidenceStatusBadgeClass(ev.status)}>{ev.status.replace('_', ' ')}</span></td>
+                  {!isFieldOfficer && <td><span className={evidenceStatusBadgeClass(ev.status)}>{ev.status.replace('_', ' ')}</span></td>}
                   <td style={{ color:'var(--text-primary)', fontSize:'0.85rem' }}>{ev.user?.full_name ?? '—'}</td>
                   <td style={{ fontSize:'0.8rem' }}>{formatDateTime(ev.created_at)}</td>
                   <td style={{ fontSize:'0.8rem' }}>{formatBytes(ev.image_size_bytes)}</td>
                   <td>
                     <span className="hash-display">{truncateHash(ev.image_sha256_hash)}</span>
                   </td>
-                  <td>
+                  {!isFieldOfficer && <td>
                     {ev.ai_verification ? (
                       <span className={aiStatusBadgeClass(ev.ai_verification.status)}>
                         {ev.ai_verification.status}
                       </span>
                     ) : '—'}
-                  </td>
+                  </td>}
                   <td>
                     <div style={{ display:'flex', gap:6 }}>
                       <button className="btn btn-secondary btn-sm"
                         onClick={() => navigate(`/evidence/${ev.id}`)} title="View">
                         <Eye size={14} />
                       </button>
-                      <button className="btn btn-danger btn-sm"
-                        onClick={() => handleDelete(ev.id, ev.evidence_number)} title="Delete">
-                        <Trash2 size={14} />
-                      </button>
+                      {!isFieldOfficer && (
+                        <button className="btn btn-danger btn-sm"
+                          onClick={() => handleDelete(ev.id, ev.evidence_number)} title="Delete">
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

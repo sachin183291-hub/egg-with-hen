@@ -8,10 +8,13 @@ import {
 } from '../utils/helpers'
 import { ArrowLeft, Shield, Cpu, Blocks, MapPin, Clock, Hash, User, Smartphone } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuth } from '../hooks/useAuth'
 
 export default function EvidenceDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const isFieldOfficer = user?.role === 'FIELD_OFFICER'
   const [evidence, setEvidence] = useState<Evidence | null>(null)
   const [loading, setLoading] = useState(true)
   const [aiLoading, setAiLoading] = useState(false)
@@ -167,9 +170,11 @@ export default function EvidenceDetailPage() {
             <p className="page-subtitle">Evidence Detail</p>
           </div>
         </div>
-        <span className={evidenceStatusBadgeClass(evidence.status)} style={{ fontSize:'0.85rem', padding:'5px 14px' }}>
-          {evidence.status.replace('_', ' ')}
-        </span>
+        {!isFieldOfficer && (
+          <span className={evidenceStatusBadgeClass(evidence.status)} style={{ fontSize:'0.85rem', padding:'5px 14px' }}>
+            {evidence.status.replace('_', ' ')}
+          </span>
+        )}
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'340px 1fr', gap:20 }}>
@@ -209,23 +214,25 @@ export default function EvidenceDetailPage() {
           </div>
 
           {/* Actions */}
-          <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop:12 }}>
-            <button className="btn btn-secondary" onClick={runAIVerify} disabled={aiLoading}>
-              <Cpu size={15} />
-              {aiLoading ? 'Running AI Analysis...' : 'Run AI Verification'}
-            </button>
-            {(!bc || bc.status === 'NOT_REGISTERED') ? (
-              <button className="btn btn-primary" onClick={registerBlockchain} disabled={bcLoading}>
-                <Blocks size={15} />
-                {bcLoading ? 'Registering...' : 'Register on Blockchain'}
+          {!isFieldOfficer && (
+            <div style={{ display:'flex', flexDirection:'column', gap:8, marginTop:12 }}>
+              <button className="btn btn-secondary" onClick={runAIVerify} disabled={aiLoading}>
+                <Cpu size={15} />
+                {aiLoading ? 'Running AI Analysis...' : 'Run AI Verification'}
               </button>
-            ) : (
-              <button className="btn btn-secondary" onClick={verifyBlockchain} disabled={bcLoading}>
-                <Shield size={15} />
-                {bcLoading ? 'Verifying...' : 'Verify Blockchain Hash'}
-              </button>
-            )}
-          </div>
+              {(!bc || bc.status === 'NOT_REGISTERED') ? (
+                <button className="btn btn-primary" onClick={registerBlockchain} disabled={bcLoading}>
+                  <Blocks size={15} />
+                  {bcLoading ? 'Registering...' : 'Register on Blockchain'}
+                </button>
+              ) : (
+                <button className="btn btn-secondary" onClick={verifyBlockchain} disabled={bcLoading}>
+                  <Shield size={15} />
+                  {bcLoading ? 'Verifying...' : 'Verify Blockchain Hash'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Details */}
@@ -302,57 +309,59 @@ export default function EvidenceDetailPage() {
           </div>
 
           {/* AI Verification */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title"><Cpu size={16} style={{ verticalAlign:'middle', marginRight:6 }} />AI Verification</h3>
-              {ai && <span className={aiStatusBadgeClass(ai.status)}>{ai.status}</span>}
-            </div>
-            {ai ? (
-              <div>
-                <div className="detail-grid" style={{ marginBottom:12 }}>
-                  <div className="detail-item">
-                    <span className="detail-label">Tamper Probability</span>
-                    <span className="detail-value" style={{ color: (ai.tamper_probability ?? 0) > 0.3 ? '#ef4444' : '#10b981' }}>
-                      {formatPercent(ai.tamper_probability)}
-                    </span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">Confidence</span>
-                    <span className="detail-value">{formatPercent(ai.confidence_score)}</span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">ELA Score</span>
-                    <span className="detail-value">{ai.ela_score?.toFixed(4) ?? '—'}</span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">Noise Score</span>
-                    <span className="detail-value">{ai.noise_score?.toFixed(4) ?? '—'}</span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">Model</span>
-                    <span className="detail-value">{ai.model_version}</span>
-                  </div>
-                  <div className="detail-item">
-                    <span className="detail-label">Verified At</span>
-                    <span className="detail-value">{ai.verified_at ? formatDateTime(ai.verified_at) : '—'}</span>
-                  </div>
-                </div>
-                {ai.verification_message && (
-                  <div style={{
-                    background:'var(--bg-elevated)', borderRadius:'var(--radius-md)',
-                    padding:'12px', fontSize:'0.8rem', color:'var(--text-secondary)',
-                    fontStyle:'italic', borderLeft:`3px solid ${ai.status === 'VERIFIED' ? '#10b981' : ai.status === 'SUSPICIOUS' ? '#ef4444' : '#f59e0b'}`
-                  }}>
-                    {ai.verification_message}
-                  </div>
-                )}
+          {!isFieldOfficer && (
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title"><Cpu size={16} style={{ verticalAlign:'middle', marginRight:6 }} />AI Verification</h3>
+                {ai && <span className={aiStatusBadgeClass(ai.status)}>{ai.status}</span>}
               </div>
-            ) : (
-              <p style={{ color:'var(--text-muted)', fontSize:'0.85rem' }}>
-                No AI verification yet. Click "Run AI Verification" to analyze.
-              </p>
-            )}
-          </div>
+              {ai ? (
+                <div>
+                  <div className="detail-grid" style={{ marginBottom:12 }}>
+                    <div className="detail-item">
+                      <span className="detail-label">Tamper Probability</span>
+                      <span className="detail-value" style={{ color: (ai.tamper_probability ?? 0) > 0.3 ? '#ef4444' : '#10b981' }}>
+                        {formatPercent(ai.tamper_probability)}
+                      </span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Confidence</span>
+                      <span className="detail-value">{formatPercent(ai.confidence_score)}</span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">ELA Score</span>
+                      <span className="detail-value">{ai.ela_score?.toFixed(4) ?? '—'}</span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Noise Score</span>
+                      <span className="detail-value">{ai.noise_score?.toFixed(4) ?? '—'}</span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Model</span>
+                      <span className="detail-value">{ai.model_version}</span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="detail-label">Verified At</span>
+                      <span className="detail-value">{ai.verified_at ? formatDateTime(ai.verified_at) : '—'}</span>
+                    </div>
+                  </div>
+                  {ai.verification_message && (
+                    <div style={{
+                      background:'var(--bg-elevated)', borderRadius:'var(--radius-md)',
+                      padding:'12px', fontSize:'0.8rem', color:'var(--text-secondary)',
+                      fontStyle:'italic', borderLeft:`3px solid ${ai.status === 'VERIFIED' ? '#10b981' : ai.status === 'SUSPICIOUS' ? '#ef4444' : '#f59e0b'}`
+                    }}>
+                      {ai.verification_message}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p style={{ color:'var(--text-muted)', fontSize:'0.85rem' }}>
+                  No AI verification yet. Click "Run AI Verification" to analyze.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Blockchain */}
           <div className="card">
