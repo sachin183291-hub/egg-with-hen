@@ -308,7 +308,7 @@ async def upload_evidence(
         if initial_status == EvidenceStatusEnum.VERIFIED and ai_status == AIStatusEnum.VERIFIED:
             evidence.status = EvidenceStatusEnum.VERIFIED
         else:
-            evidence.status = EvidenceStatusEnum.REJECTED
+            evidence.status = EvidenceStatusEnum.SUSPICIOUS
             evidence.rejection_reason = "Validation Failed: "
             if initial_status != EvidenceStatusEnum.VERIFIED:
                 evidence.rejection_reason += "Timestamp exceeds 3 mins. "

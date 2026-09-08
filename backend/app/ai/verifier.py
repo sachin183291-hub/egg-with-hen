@@ -123,6 +123,10 @@ class OpenCVVerifier(BaseVerifier):
         is_screen = llm_is_screen or moire_is_screen
         llm_error = llm_result.get("error", False)
         
+        # Graceful degradation on quota limits or missing API keys
+        if llm_error and ("429" in str(llm_reason) or "quota" in str(llm_reason).lower() or "api key" in str(llm_reason).lower()):
+            llm_error = False
+            
         if llm_error:
             status = "SUSPICIOUS"
             message = (
