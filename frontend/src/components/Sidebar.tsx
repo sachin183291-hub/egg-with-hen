@@ -72,7 +72,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
         <nav className="sidebar-nav">
           {navItems.map(group => {
             const filteredItems = group.items.filter(item => {
-              if (item.adminOnly && !isAdmin) return false
+              if ((item as any).adminOnly && !isAdmin) return false
               if ((item as any).hideFromRestricted && isRestrictedRole) return false
               return true
             })
