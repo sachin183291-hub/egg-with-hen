@@ -1,6 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import krLogo from '../kr-logo.png'
 import { getInitials } from '../utils/helpers'
 import { useTranslation } from 'react-i18next'
 import {
@@ -60,10 +59,10 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
         <div className="sidebar-logo">
           <div className="sidebar-logo-mark">
-            <img src={krLogo} alt="KR Group Logo" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
+            <img src="/giotag-logo.jpg" alt="GioTag Logo" style={{ height: '40px', width: 'auto', objectFit: 'contain', borderRadius: '4px' }} />
             <div className="sidebar-logo-text" style={{ marginLeft: '10px' }}>
-              <span className="sidebar-logo-name">KR Group</span>
-              <span className="sidebar-logo-sub">POULTRY</span>
+              <span className="sidebar-logo-name">GioTag</span>
+              <span className="sidebar-logo-sub">SYSTEM</span>
             </div>
           </div>
         </div>

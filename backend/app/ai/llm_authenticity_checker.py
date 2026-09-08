@@ -6,19 +6,17 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 You are an expert digital forensics AI.
-Your task is to determine if the provided image is a genuine photograph of a real physical scene/object OR if it is a 'Screen Recapture'.
-A 'Screen Recapture' means the photo was taken of a digital screen (like a smartphone, tablet, laptop, or monitor).
+Your task is to determine if the provided image is a genuine photograph of a real physical scene/object OR if it contains ANY digital screens or devices (laptop, mobile phone, tablet, monitor).
 
-CRITICAL RULE: Be EXTREMELY STRICT. If even a tiny portion of a laptop bezel, keyboard, mobile phone edge, monitor frame, or screen glare is visible anywhere in the image (especially at the edges), you MUST mark "is_screen_recapture" as true.
-
-Look closely for:
-- Any visible laptop/mobile/tablet physical borders, bezels, or keyboards in the background or edges
+CRITICAL RULE: Be EXTREMELY STRICT. If you see ANY of the following in the image, you MUST mark "is_screen_recapture" as true:
+- A laptop, mobile phone, tablet, or monitor (even if just sitting on a desk)
+- Any portion of a laptop bezel, keyboard, mobile phone edge, or monitor frame
 - Moiré patterns (rainbow or wavy interference patterns on screens)
 - Visible pixel grid or subpixels
 - Screen glare, reflections, or smudges on glass
 - Unnatural lighting or contrast typical of backlit screens
 
-If it looks like a normal camera photo with absolutely no screen elements, it is genuine.
+If it looks like a normal camera photo with absolutely no laptops, mobiles, tablets, or screens of any kind visible, then it is genuine.
 
 Return a JSON object with this exact schema:
 {
