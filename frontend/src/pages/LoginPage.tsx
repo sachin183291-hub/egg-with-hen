@@ -158,9 +158,6 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <p className="auth-footer-note">
-            {t('login.demoNote')}
-          </p>
         </div>
       </div>
     </div>

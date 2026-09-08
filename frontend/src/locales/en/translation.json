@@ -31,8 +31,7 @@
     "passwordLabel": "Password",
     "signInBtn": "Sign In to Dashboard",
     "authenticating": "Authenticating...",
-    "demoAccounts": "DEMO ACCOUNTS",
-    "demoNote": "⚠️ Demo credentials for testing only. Not for production use."
+    "demoAccounts": "DEMO ACCOUNTS"
   },
   "eggCounter": {
     "title": "AI Egg & Tray Counter",
