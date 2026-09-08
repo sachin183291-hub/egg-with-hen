@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './hooks/useAuth'
 import DashboardLayout from './layouts/DashboardLayout'
+import InstallPrompt from './components/InstallPrompt'
 
 // Lazy load pages for better performance
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -31,6 +32,7 @@ const PageLoader = () => (
 export default function App() {
   return (
     <AuthProvider>
+      <InstallPrompt />
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
