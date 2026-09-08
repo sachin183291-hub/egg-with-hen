@@ -1,5 +1,6 @@
 import json
 import logging
+import base64
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ def check_image_authenticity(image_bytes: bytes) -> Dict[str, Any]:
         elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[8:12]:
             mime_type = "image/webp"
             
-        model = genai.GenerativeModel("models/gemini-2.5-flash")
+        model = genai.GenerativeModel("models/gemini-3.6-flash")
         
         image_parts = [
             {"mime_type": mime_type, "data": image_bytes}
