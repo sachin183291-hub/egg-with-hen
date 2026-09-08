@@ -121,6 +121,8 @@ export default function EvidenceDetailPage() {
     }
   }
 
+  const [isImageExpanded, setIsImageExpanded] = useState(false)
+
   if (loading) return (
     <div className="loading-screen"><div className="spinner" style={{ width:32, height:32 }} /></div>
   )
@@ -138,6 +140,23 @@ export default function EvidenceDetailPage() {
 
   return (
     <div>
+      {/* Fullscreen Image Overlay */}
+      {isImageExpanded && imgUrl && (
+        <div 
+          onClick={() => setIsImageExpanded(false)}
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999,
+            display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'zoom-out'
+          }}
+        >
+          <img src={imgUrl} alt="Fullscreen Evidence" style={{ maxWidth: '95%', maxHeight: '95%', objectFit: 'contain', borderRadius: '8px' }} />
+          <div style={{ position: 'absolute', top: 20, right: 20, color: 'white', background: 'rgba(255,255,255,0.2)', padding: '8px 16px', borderRadius: '20px', fontSize: '0.9rem', fontWeight: 600 }}>
+            Click anywhere to close
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>
@@ -159,7 +178,8 @@ export default function EvidenceDetailPage() {
           <div className="card" style={{ padding:0, overflow:'hidden' }}>
             {imgUrl ? (
               <img src={imgUrl} alt={evidence.image_filename}
-                style={{ width:'100%', height:300, objectFit:'cover', display:'block' }} />
+                onClick={() => setIsImageExpanded(true)}
+                style={{ width:'100%', height:300, objectFit:'cover', display:'block', cursor: 'zoom-in' }} />
             ) : (
               <div style={{
                 width:'100%', height:300, display:'flex', alignItems:'center',

@@ -336,14 +336,31 @@ async def upload_evidence(
         )
     db.add(ai)
 
-    # Blockchain placeholder
-    bc = BlockchainRecord(
-        id=str(uuid.uuid4()),
-        evidence_id=ev_id,
-        image_hash=server_hash,
-        provider="local",
-        status=BlockchainStatusEnum.NOT_REGISTERED,
-    )
+    # Automatic Blockchain Registration
+    from app.blockchain.ledger import blockchain
+    try:
+        bc_result = blockchain.register_hash(ev_id, server_hash)
+        bc = BlockchainRecord(
+            id=str(uuid.uuid4()),
+            evidence_id=ev_id,
+            image_hash=server_hash,
+            transaction_id=bc_result["transaction_id"],
+            block_number=bc_result["block_number"],
+            block_hash=bc_result["block_hash"],
+            chain_id=bc_result.get("chain_id", "local"),
+            provider="local",
+            status=BlockchainStatusEnum.REGISTERED,
+            registered_at=datetime.utcnow()
+        )
+    except Exception as e:
+        bc = BlockchainRecord(
+            id=str(uuid.uuid4()),
+            evidence_id=ev_id,
+            image_hash=server_hash,
+            provider="local",
+            status=BlockchainStatusEnum.NOT_REGISTERED,
+        )
+        print(f"Auto-blockchain registration failed: {e}")
     db.add(bc)
 
     # Update device last_seen
