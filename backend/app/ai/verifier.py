@@ -124,15 +124,14 @@ class OpenCVVerifier(BaseVerifier):
         llm_error = llm_result.get("error", False)
         
         # Graceful degradation on quota limits or missing API keys
-        if llm_error and ("429" in str(llm_reason) or "quota" in str(llm_reason).lower() or "api key" in str(llm_reason).lower()):
-            llm_error = False
-            # If LLM gracefully failed, don't fallback to OpenCV Moiré, let it pass as VERIFIED unless it's obviously manipulated
+        # We REMOVED the bypass because the user gets confused when it silently defaults to VERIFIED.
+        # Now it will explicitly fail and show the quota error on the frontend.
             
         if llm_error:
             status = "SUSPICIOUS"
             message = (
                 "AI-assisted verification: System Error! "
-                f"The AI device detection failed. Marked as Suspicious by default to prevent bypass. Error: {llm_reason}"
+                f"The AI device detection failed. Marked as Suspicious by default. Error: {llm_reason}"
             )
             confidence = 0.5
             tamper_probability = 0.9
