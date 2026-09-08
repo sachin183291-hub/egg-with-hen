@@ -33,7 +33,7 @@ def check_image_authenticity(image_bytes: bytes) -> Dict[str, Any]:
         import google.generativeai as genai
         
         if not settings.GEMINI_API_KEY or len(settings.GEMINI_API_KEY.strip()) < 10:
-            return {"is_screen_recapture": False, "confidence": 0.0, "reason": "No Gemini API key configured"}
+            return {"is_screen_recapture": False, "confidence": 0.0, "reason": "No Gemini API key configured", "error": True}
             
         genai.configure(api_key=settings.GEMINI_API_KEY)
         
@@ -61,8 +61,9 @@ def check_image_authenticity(image_bytes: bytes) -> Dict[str, Any]:
         return {
             "is_screen_recapture": bool(data.get("is_screen_recapture", False)),
             "confidence": float(data.get("confidence", 0.0)),
-            "reason": str(data.get("reason", ""))
+            "reason": str(data.get("reason", "")),
+            "error": False
         }
     except Exception as e:
         logger.error(f"Authenticity check failed: {e}")
-        return {"is_screen_recapture": False, "confidence": 0.0, "reason": str(e)}
+        return {"is_screen_recapture": False, "confidence": 0.0, "reason": str(e), "error": True}

@@ -119,10 +119,19 @@ class OpenCVVerifier(BaseVerifier):
         combined_score = (ela_score * 0.5) + (noise_score * 0.5)
 
         # Step 6: Determine status
-        # Trigger SUSPICIOUS if either LLM or OpenCV detects a screen recapture
+        # Trigger SUSPICIOUS if either LLM or OpenCV detects a screen recapture or if LLM failed
         is_screen = llm_is_screen or moire_is_screen
+        llm_error = llm_result.get("error", False)
         
-        if is_screen:
+        if llm_error:
+            status = "SUSPICIOUS"
+            message = (
+                "AI-assisted verification: System Error! "
+                f"The AI device detection failed. Marked as Suspicious by default to prevent bypass. Error: {llm_reason}"
+            )
+            confidence = 0.5
+            tamper_probability = 0.9
+        elif is_screen:
             status = "SUSPICIOUS"
             if moire_is_screen and not llm_is_screen:
                 message = (
