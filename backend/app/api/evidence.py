@@ -300,9 +300,20 @@ async def upload_evidence(
     try:
         ai_result = verify_image_content(content)
         
-        # If AI detects screen recapture or tampering, override the timestamp verification status
-        if ai_result.get("status") == "SUSPICIOUS":
-            evidence.status = EvidenceStatusEnum.SUSPICIOUS
+        # Combine statuses to form final Evidence status
+        # If timestamp is verified AND AI is verified -> VERIFIED
+        # If timestamp is suspicious OR AI is suspicious/failed -> REJECTED (failed)
+        ai_status = AIStatusEnum[ai_result["status"]]
+        
+        if initial_status == EvidenceStatusEnum.VERIFIED and ai_status == AIStatusEnum.VERIFIED:
+            evidence.status = EvidenceStatusEnum.VERIFIED
+        else:
+            evidence.status = EvidenceStatusEnum.REJECTED
+            evidence.rejection_reason = "Validation Failed: "
+            if initial_status != EvidenceStatusEnum.VERIFIED:
+                evidence.rejection_reason += "Timestamp exceeds 3 mins. "
+            if ai_status != AIStatusEnum.VERIFIED:
+                evidence.rejection_reason += "AI detected screen/tampering or failed."
             
         ai = AIVerification(
             id=str(uuid.uuid4()),
