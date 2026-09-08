@@ -119,13 +119,14 @@ class OpenCVVerifier(BaseVerifier):
         combined_score = (ela_score * 0.5) + (noise_score * 0.5)
 
         # Step 6: Determine status
-        # Trigger SUSPICIOUS if either LLM or OpenCV detects a screen recapture or if LLM failed
-        is_screen = llm_is_screen or moire_is_screen
+        # Trigger SUSPICIOUS ONLY if LLM detects a screen recapture or if LLM failed
+        is_screen = llm_is_screen
         llm_error = llm_result.get("error", False)
         
         # Graceful degradation on quota limits or missing API keys
         if llm_error and ("429" in str(llm_reason) or "quota" in str(llm_reason).lower() or "api key" in str(llm_reason).lower()):
             llm_error = False
+            # If LLM gracefully failed, don't fallback to OpenCV Moiré, let it pass as VERIFIED unless it's obviously manipulated
             
         if llm_error:
             status = "SUSPICIOUS"
@@ -137,20 +138,12 @@ class OpenCVVerifier(BaseVerifier):
             tamper_probability = 0.9
         elif is_screen:
             status = "SUSPICIOUS"
-            if moire_is_screen and not llm_is_screen:
-                message = (
-                    "AI-assisted verification: Screen Recapture Detected! "
-                    f"The FFT analysis detected periodic Moiré patterns indicative of a pixel grid (Mobile, Tab, or Laptop screen). "
-                )
-                confidence = max(0.8, moire_score)
-                tamper_probability = max(0.7, moire_score)
-            else:
-                message = (
-                    "AI-assisted verification: Screen Recapture Detected! "
-                    f"The AI determined this is a photo of a screen rather than a live photo. Reason: {llm_reason}"
-                )
-                confidence = max(0.9, llm_confidence)
-                tamper_probability = max(0.7, llm_confidence)
+            message = (
+                "AI-assisted verification: Screen Recapture Detected! "
+                f"The AI determined this is a photo of a screen rather than a live photo. Reason: {llm_reason}"
+            )
+            confidence = max(0.9, llm_confidence)
+            tamper_probability = max(0.7, llm_confidence)
         else:
             status = "VERIFIED"
             message = (
