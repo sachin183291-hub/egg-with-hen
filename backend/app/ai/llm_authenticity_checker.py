@@ -5,25 +5,24 @@ from typing import Dict, Any
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
-You are an expert digital forensics AI.
-Your task is to determine if the user is trying to cheat by taking a photograph OF an image displayed on a digital screen (a screen recapture).
+You are an expert digital forensics AI. 
+Your ONLY job is to detect if a photo is a "Screen Recapture". 
+A "Screen Recapture" means the user took a photo of an image displayed on a digital screen (like a monitor, laptop, or mobile phone) to fake a live photo.
 
-CRITICAL RULE: Mark "is_screen_recapture" as true ONLY if:
-1. The photograph is clearly taken OF a digital screen (e.g., you are looking at a photo displayed on a monitor, laptop, tablet, or phone screen).
-2. You see clear evidence of screen recapture, such as screen bezels framing the entire image, pixel grids, screen glare over the image, or moiré patterns.
-
-EXCEPTIONS (DO NOT MARK AS TRUE FOR THESE):
-- If there is simply a laptop, mobile phone, or monitor sitting in the background or on a desk in a normal room, DO NOT mark it as true. We only care if the MAIN SUBJECT is an image on a screen.
-- IGNORE any digitally added Geotag overlays, timestamps, map snippets, or text at the bottom/corners of the image. These are app overlays, not screens.
-- Bedsheets, clothes, or checkered fabrics are NOT screens.
+ANALYSIS STEPS:
+1. Identify the MAIN SUBJECT of the photo.
+2. Is the main subject being displayed on a screen? Look for screen bezels framing the image, pixel grids, or screen glare.
+3. If yes, it is a screen recapture.
+4. If the photo is just a normal room/scene, and there happens to be a laptop or mobile phone sitting on a table in the background, THIS IS NOT A SCREEN RECAPTURE. The device is just part of the scene. Do NOT flag it.
+5. IGNORE any Geotag text, maps, or timestamps overlaid on the image. These are app overlays.
 
 Return a JSON object with this exact schema:
 {
     "is_screen_recapture": true/false,
     "confidence": 0.0 to 1.0,
-    "reason": "Brief explanation of what you see."
+    "reason": "Detailed step-by-step reasoning based on the ANALYSIS STEPS."
 }
-Respond ONLY with the JSON object, no markdown or extra text.
+Respond ONLY with valid JSON.
 """
 
 def check_image_authenticity(image_bytes: bytes) -> Dict[str, Any]:
