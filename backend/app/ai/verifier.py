@@ -146,8 +146,8 @@ class OpenCVVerifier(BaseVerifier):
                 tamper_probability = max(0.7, moire_score)
             else:
                 message = (
-                    "AI-assisted verification: Screen/Device Detected! "
-                    f"The AI determined this image contains a screen or device (Laptop, Mobile, Tab, etc). Reason: {llm_reason}"
+                    "AI-assisted verification: Screen Recapture Detected! "
+                    f"The AI determined this is a photo of a screen rather than a live photo. Reason: {llm_reason}"
                 )
                 confidence = max(0.9, llm_confidence)
                 tamper_probability = max(0.7, llm_confidence)
