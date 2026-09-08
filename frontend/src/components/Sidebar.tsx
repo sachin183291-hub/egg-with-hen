@@ -11,7 +11,7 @@ import {
 const navItems = [
   { group: 'Main', items: [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/map', label: 'GIS Map', icon: Map },
+    { to: '/map', label: 'GIS Map', icon: Map, hideFromRestricted: true },
     { to: '/evidence', label: 'Evidence', icon: Image },
   ]},
   { group: 'Management', items: [
@@ -20,12 +20,12 @@ const navItems = [
     { to: '/drone', label: 'Drone', icon: Plane },
   ]},
   { group: 'Verification', items: [
-    { to: '/ai-verification', label: 'AI Verification', icon: Cpu },
+    { to: '/ai-verification', label: 'AI Verification', icon: Cpu, hideFromRestricted: true },
     { to: '/egg-counter', label: 'Egg Counter', icon: CheckSquare },
     { to: '/egg-ai-chat', label: 'AI Vision Chat', icon: MessageCircle },
     { to: '/hen-health', label: 'Hen Health', icon: HeartPulse },
     { to: '/thermal-camera', label: 'Thermal Camera', icon: Thermometer },
-    { to: '/blockchain', label: 'Blockchain', icon: Blocks },
+    { to: '/blockchain', label: 'Blockchain', icon: Blocks, hideFromRestricted: true },
   ]},
   { group: 'Records', items: [
     { to: '/audit-logs', label: 'Audit Logs', icon: ClipboardList, adminOnly: true },
@@ -50,6 +50,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
   }
 
   const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'DEPT_ADMIN'
+  const isRestrictedRole = user?.role === 'FIELD_OFFICER' || user?.role === 'VIEWER'
 
   return (
     <>
@@ -70,7 +71,11 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
 
         <nav className="sidebar-nav">
           {navItems.map(group => {
-            const filteredItems = group.items.filter(item => !item.adminOnly || isAdmin)
+            const filteredItems = group.items.filter(item => {
+              if (item.adminOnly && !isAdmin) return false
+              if ((item as any).hideFromRestricted && isRestrictedRole) return false
+              return true
+            })
             if (filteredItems.length === 0) return null
             return (
               <div key={group.group}>
