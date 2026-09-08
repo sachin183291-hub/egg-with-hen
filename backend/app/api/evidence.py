@@ -5,8 +5,12 @@ Handles secure multipart upload, hash verification, AI trigger, and blockchain r
 import uuid
 import json
 import io
+import pillow_heif
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
+
+# Support HEIC images globally
+pillow_heif.register_heif_opener()
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Form, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
