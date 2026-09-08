@@ -17,7 +17,7 @@ asyncpg==0.29.0
 
 # Image / AI
 opencv-python-headless==4.9.0.80
-Pillow==10.3.0
+Pillow>=11.1.0
 numpy==1.26.4
 ultralytics
 
