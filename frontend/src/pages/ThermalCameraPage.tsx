@@ -12,6 +12,43 @@ export default function ThermalCameraPage() {
   const [error, setError] = useState<string | null>(null)
   
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null)
+  
+  // Live Stream State
+  const [activeTab, setActiveTab] = useState<'upload' | 'live'>('upload')
+  const [liveStreamIp, setLiveStreamIp] = useState<string | null>(null)
+  const [isLiveConnected, setIsLiveConnected] = useState(false)
+  const [finalRecord, setFinalRecord] = useState<{count: number, videoUrl: string} | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const API_URL = import.meta.env.VITE_API_URL || ''
+
+  const connectLiveStream = () => {
+    const ip = localStorage.getItem('droneIP')
+    if (ip) {
+      setLiveStreamIp(ip)
+      setIsLiveConnected(true)
+      setFinalRecord(null)
+      setError(null)
+    } else {
+      setError("No Drone IP found. Please configure it in the Drone Control menu first.")
+    }
+  }
+  
+  const handleStopStream = async () => {
+    setIsLiveConnected(false)
+    setIsSaving(true)
+    try {
+      await new Promise(res => setTimeout(res, 1000))
+      const res = await fetch(`${API_URL}/api/ai/drone-stream/latest`)
+      const data = await res.json()
+      if (data.video_path) {
+        setFinalRecord({ count: data.final_count, videoUrl: `${API_URL}/api/ai/drone-stream/video` })
+      }
+    } catch (e) {
+      console.error("Error fetching latest record:", e)
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -39,12 +76,10 @@ export default function ThermalCameraPage() {
 
       if (isVideo) {
         const response = await aiApi.thermalAnalyzeVideo(formData)
-        // Response is a blob
         const videoBlob = new Blob([response.data], { type: 'video/mp4' })
         const url = URL.createObjectURL(videoBlob)
         setProcessedVideoUrl(url)
         
-        // Try to get count from headers
         const countHeader = response.headers['x-hen-count']
         setResult({ hen_count: countHeader ? parseInt(countHeader, 10) : 0, is_video: true })
       } else {
@@ -90,7 +125,7 @@ export default function ThermalCameraPage() {
               Thermal Drone Camera
             </h1>
             <p className="page-subtitle">
-              Upload a drone video or image to simulate thermal view and detect hens based on heat hotspots (20°C - 40°C).
+              Upload a drone video or stream live to simulate thermal view and detect hens based on heat hotspots (20°C - 40°C).
             </p>
           </div>
         </div>
@@ -103,7 +138,24 @@ export default function ThermalCameraPage() {
             <Camera size={20} className="text-brand" /> Original View
           </h3>
           
-          {!previewUrl ? (
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+            <button 
+              onClick={() => setActiveTab('upload')} 
+              className={`btn ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1 }}
+            >
+              <UploadCloud size={18} style={{ marginRight: 8 }} /> Upload Media
+            </button>
+            <button 
+              onClick={() => setActiveTab('live')} 
+              className={`btn ${activeTab === 'live' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1 }}
+            >
+              <Video size={18} style={{ marginRight: 8 }} /> Live Drone Feed
+            </button>
+          </div>
+          
+          {activeTab === 'upload' && !previewUrl && (
             <label style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               border: '2px dashed var(--border)', borderRadius: '12px', padding: '48px', cursor: 'pointer',
@@ -114,7 +166,57 @@ export default function ThermalCameraPage() {
               <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>MP4, AVI, PNG, JPG</span>
               <input type="file" accept="image/*,video/*" onChange={handleImageUpload} style={{ display: 'none' }} />
             </label>
-          ) : (
+          )}
+          
+          {activeTab === 'live' && !isLiveConnected && !finalRecord && (
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              border: '2px dashed var(--border)', borderRadius: '12px', padding: '48px',
+              background: 'rgba(255,255,255,0.02)'
+            }}>
+              <Video size={48} color="var(--brand-400)" style={{ marginBottom: '16px' }} />
+              <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '16px' }}>Connect to Global Drone IP</span>
+              <button className="btn btn-primary" onClick={connectLiveStream}>
+                Connect Live Stream
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'live' && isLiveConnected && liveStreamIp && (
+            <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+              <img 
+                src={`${API_URL}/api/ai/drone-stream?ip=${encodeURIComponent(liveStreamIp)}`} 
+                alt="Live Thermal Stream" 
+                style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} 
+              />
+              <button 
+                onClick={handleStopStream}
+                disabled={isSaving}
+                className="btn btn-danger"
+                style={{
+                  position: 'absolute', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
+                  background: '#ef4444', color: 'white', border: 'none', padding: '8px 24px',
+                  borderRadius: '24px', fontWeight: 'bold', boxShadow: '0 4px 12px rgba(239,68,68,0.4)',
+                  cursor: 'pointer'
+                }}
+              >
+                {isSaving ? 'Saving...' : 'Stop & Save Recording'}
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'live' && finalRecord && (
+            <div style={{ borderRadius: '12px', padding: '24px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border)', textAlign: 'center' }}>
+               <h2 style={{ color: '#ef4444', marginBottom: '8px' }}>Final Count: {finalRecord.count} Hens</h2>
+               <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Stream recorded and analyzed successfully.</p>
+               <video src={finalRecord.videoUrl} controls style={{ width: '100%', maxHeight: '300px', borderRadius: '8px' }}></video>
+               <button className="btn btn-secondary" onClick={() => setFinalRecord(null)} style={{ marginTop: '16px' }}>
+                 Start New Session
+               </button>
+            </div>
+          )}
+          
+          {activeTab === 'upload' && previewUrl && (
             <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)' }}>
               {isVideo ? (
                 <video src={previewUrl} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
@@ -140,7 +242,7 @@ export default function ThermalCameraPage() {
             </div>
           )}
 
-          {previewUrl && !result && (
+          {activeTab === 'upload' && previewUrl && !result && (
             <button 
               onClick={startAnalysis} 
               disabled={isAnalyzing}
@@ -168,10 +270,17 @@ export default function ThermalCameraPage() {
             <Thermometer size={20} className="text-brand" /> Thermal Analysis Result
           </h3>
 
-          {!result && !isAnalyzing && (
+          {!result && !isAnalyzing && activeTab === 'upload' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', opacity: 0.5 }}>
               <Thermometer size={64} color="var(--text-muted)" style={{ marginBottom: '16px' }} />
               <p>Upload media to see the thermal detection.</p>
+            </div>
+          )}
+          
+          {!result && !isAnalyzing && activeTab === 'live' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', opacity: 0.5 }}>
+              <Activity size={64} color="var(--text-muted)" style={{ marginBottom: '16px' }} />
+              <p>Live stream results will be shown here during tracking.</p>
             </div>
           )}
 
@@ -185,7 +294,6 @@ export default function ThermalCameraPage() {
 
           {result && (
             <div className="fade-in">
-              {/* Summary header */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '20px', padding: '20px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)' }}>
                 <div>
                   <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#ef4444', fontWeight: '700', marginBottom: '4px' }}>
@@ -201,7 +309,6 @@ export default function ThermalCameraPage() {
                 </div>
               </div>
 
-              {/* Per-hen temperature table */}
               {result.hens && result.hens.length > 0 && (
                 <div style={{ marginBottom: '16px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>

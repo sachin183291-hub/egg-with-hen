@@ -569,3 +569,26 @@ async def drone_stream(ip: str):
         generate_thermal_stream(stream_url),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+@router.get("/drone-stream/latest")
+async def get_latest_drone_stream():
+    """Get the final count and status of the latest drone stream session."""
+    from app.ai.thermal_service import LATEST_STREAM_RECORD
+    return LATEST_STREAM_RECORD
+
+@router.get("/drone-stream/video")
+async def get_latest_drone_video():
+    """Serve the recorded mp4 file of the latest drone stream session."""
+    from fastapi.responses import FileResponse
+    from app.ai.thermal_service import LATEST_STREAM_RECORD
+    import os
+    
+    video_path = LATEST_STREAM_RECORD.get("video_path")
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="No stream recording found.")
+        
+    return FileResponse(
+        path=video_path,
+        media_type="video/mp4",
+        filename="drone_thermal_recording.mp4"
+    )

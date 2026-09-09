@@ -3,10 +3,11 @@ import { Plane, Battery, Wifi, Save, Activity, Signal, ArrowUp, Wind, Camera, Ma
 
 export default function DronePage() {
   const [batteryLevel, setBatteryLevel] = useState(85)
-  const [ipAddress, setIpAddress] = useState('192.168.1.100')
+  const [ipAddress, setIpAddress] = useState(localStorage.getItem('droneIP') || '192.168.1.100')
   const [savedIp, setSavedIp] = useState('')
   const API_URL = import.meta.env.VITE_API_URL || ''
   const [isSaving, setIsSaving] = useState(false)
+  const [finalRecord, setFinalRecord] = useState<{count: number, videoUrl: string} | null>(null)
   
   // Drone status metrics
   const [isConnected, setIsConnected] = useState(true)
@@ -31,11 +32,30 @@ export default function DronePage() {
 
   const handleSaveIp = () => {
     setIsSaving(true)
+    setFinalRecord(null)
     setTimeout(() => {
       setSavedIp(ipAddress)
+      localStorage.setItem('droneIP', ipAddress)
       setIsSaving(false)
-      alert(`Drone IP Address successfully set to: ${ipAddress}`)
-    }, 800)
+    }, 600)
+  }
+  
+  const handleStopStream = async () => {
+    setSavedIp('') // Stops the stream
+    setIsSaving(true)
+    try {
+      // Wait a moment for backend to finalize the video
+      await new Promise(res => setTimeout(res, 1000))
+      const res = await fetch(`${API_URL}/api/ai/drone-stream/latest`)
+      const data = await res.json()
+      if (data.video_path) {
+        setFinalRecord({ count: data.final_count, videoUrl: `${API_URL}/api/ai/drone-stream/video` })
+      }
+    } catch (e) {
+      console.error("Error fetching latest record:", e)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -94,6 +114,12 @@ export default function DronePage() {
                   e.currentTarget.src = "https://images.unsplash.com/photo-1508614589041-895b88991e3e?q=80&w=2000&auto=format&fit=crop";
                 }}
               />
+            ) : finalRecord ? (
+              <div style={{ width: '100%', height: '450px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: 'white' }}>
+                <h2 style={{ color: '#ef4444', marginBottom: '8px' }}>Final Count: {finalRecord.count} Hens</h2>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Stream recorded successfully.</p>
+                <video src={finalRecord.videoUrl} controls style={{ width: '80%', maxHeight: '300px', border: '1px solid var(--border)' }}></video>
+              </div>
             ) : (
               <div style={{ width: '100%', height: '450px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: 'var(--text-muted)' }}>
                 Please Bind IP to Start Live Stream
@@ -154,14 +180,14 @@ export default function DronePage() {
                     placeholder="192.168.1.10"
                     style={{ flex: 1, border: '1px solid var(--border-strong)', background: 'var(--bg-elevated)' }}
                   />
-                  <button 
-                    className="btn btn-primary" 
-                    onClick={handleSaveIp}
-                    disabled={isSaving || !ipAddress}
-                    style={{ whiteSpace: 'nowrap' }}
-                  >
-                    {isSaving ? 'Linking...' : <><Save size={16} /> Bind IP</>}
+                  <button className="btn btn-primary" onClick={handleSaveIp} disabled={isSaving} style={{ padding: '0 24px', whiteSpace: 'nowrap' }}>
+                    {isSaving && !savedIp ? <div className="spinner" style={{ width: '16px', height: '16px', borderTopColor: 'white' }}></div> : 'Bind IP'}
                   </button>
+                  {savedIp && (
+                    <button className="btn btn-danger" onClick={handleStopStream} style={{ padding: '0 24px', whiteSpace: 'nowrap', background: '#ef4444' }}>
+                      Stop & Save
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

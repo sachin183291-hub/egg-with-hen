@@ -341,18 +341,26 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         "video_path": output_path
     }
 
+# Global variable to store latest stream results
+LATEST_STREAM_RECORD = {
+    "video_path": None,
+    "final_count": 0
+}
+
 async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: float = 40.0):
     import asyncio
+    import os
+    from datetime import datetime
+    global LATEST_STREAM_RECORD
+    
     cap = cv2.VideoCapture(url)
     if not cap.isOpened():
-        # Fallback for testing: yield a placeholder image
         placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
         cv2.putText(placeholder, "Connecting to drone stream...", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
         _, buffer = cv2.imencode('.jpg', placeholder)
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
         
-        # Try to open again if it was just slow
         await asyncio.sleep(2)
         cap = cv2.VideoCapture(url)
         if not cap.isOpened():
@@ -360,23 +368,44 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
             
     tracker = CentroidTracker(max_disappeared=15, max_distance=80)
     
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            await asyncio.sleep(0.1)
-            continue
+    # Setup VideoWriter
+    os.makedirs('storage', exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_video_path = f"storage/drone_record_{timestamp}.mp4"
+    out = None
+    
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                await asyncio.sleep(0.1)
+                continue
+                
+            annotated_frame, _, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
             
-        annotated_frame, _, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
-        
-        # Encode frame to JPEG
-        ret, buffer = cv2.imencode('.jpg', annotated_frame)
-        if not ret:
-            continue
+            # Initialize VideoWriter after reading the first valid frame to get dimensions
+            if out is None:
+                h, w = annotated_frame.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*'avc1') # Wait avc1 is compatible with HTML5 video
+                out = cv2.VideoWriter(out_video_path, fourcc, 30.0, (w, h))
             
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            out.write(annotated_frame)
+            
+            ret, buffer = cv2.imencode('.jpg', annotated_frame)
+            if not ret:
+                continue
+                
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            
+            await asyncio.sleep(0.01)
+    finally:
+        # Save final state when generator stops
+        LATEST_STREAM_RECORD["final_count"] = tracker.max_id_seen
+        LATEST_STREAM_RECORD["video_path"] = out_video_path
         
-        # Yield control to the event loop so we don't block other requests
-        await asyncio.sleep(0.01)
+        if out is not None:
+            out.release()
+        cap.release()
 
