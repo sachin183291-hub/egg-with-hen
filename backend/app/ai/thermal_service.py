@@ -324,66 +324,6 @@ def detect_thermal_hotspots(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-def _gemini_count_hens_in_thermal(image_bytes: bytes) -> Dict[str, Any]:
-    """
-    Use Gemini Vision AI to accurately count hens in a thermal image.
-    Returns dict with: hen_count (int), hens (list), confidence (str), notes (str)
-    Returns None if Gemini is unavailable.
-    """
-    try:
-        import json as _json
-        import google.generativeai as genai
-        from app.config import settings
-
-        if not settings.GEMINI_API_KEY:
-            return None
-
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-
-        prompt = """You are an expert thermal imaging analyst for poultry farms.
-This is a THERMAL CAMERA image from a drone. Hens appear as bright red/orange/yellow/white heat blobs against a cooler blue/green background.
-
-Your task: Count EXACTLY how many individual hens (chickens) are visible in this thermal image.
-
-Rules:
-- Each distinct heat blob = 1 hen (unless very large = clustered hens)
-- The color scale bar on the right edge is NOT a hen — ignore it
-- UI overlays, text, numbers on the image are NOT hens — ignore them
-- Only count actual live bird heat signatures
-- Temperature range for hens: 30°C to 42°C (medium to bright heat blobs)
-
-Return ONLY valid JSON in this exact format (no markdown, no explanation):
-{
-  "hen_count": <integer>,
-  "confidence": "high" | "medium" | "low",
-  "notes": "<brief description of what you see>",
-  "hens": [
-    {"hen_number": 1, "temperature": <estimated_temp_float>, "location": "<top-left|top-right|center|bottom-left|bottom-right>"},
-    ...
-  ]
-}"""
-
-        import io
-        from PIL import Image as PILImage
-        pil_img = PILImage.open(io.BytesIO(image_bytes))
-
-        response = model.generate_content(
-            [prompt, pil_img],
-            generation_config={"temperature": 0.0}
-        )
-
-        raw = response.text.strip()
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            raw = "\n".join(ln for ln in lines if not ln.strip().startswith("```")).strip()
-        import logging
-        logging.getLogger(__name__).warning("Gemini thermal count failed: %s", e)
-        return None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
