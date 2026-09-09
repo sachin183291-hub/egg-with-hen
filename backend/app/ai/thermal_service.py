@@ -267,7 +267,8 @@ def detect_thermal_hotspots(
     # ── 4. Update tracker (for video) or draw directly (for single image) ────
     if tracker is not None:
         objects = tracker.update(rects)
-        hen_count = tracker.max_id_seen
+        # Use currently visible objects count (caller tracks peak across frames)
+        hen_count = len(tracker.objects)
 
         for oid, centroid in objects.items():
             cx, cy = int(centroid[0]), int(centroid[1])
@@ -376,9 +377,10 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         cap.release()
         raise ValueError("Could not open VideoWriter with any available codec.")
 
-    tracker   = CentroidTracker(max_disappeared=5, max_distance=80)
-    frame_idx = 0
-    SKIP      = 15  # process every 15th frame (fast enough to avoid timeouts)
+    tracker                  = CentroidTracker(max_disappeared=5, max_distance=80)
+    frame_idx                = 0
+    SKIP                     = 15   # process every 15th frame
+    peak_simultaneous_count  = 0    # max hens visible AT THE SAME TIME in any frame
 
     while True:
         ret, frame = cap.read()
@@ -396,10 +398,14 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
                 cv2.putText(annotated_frame, f"ID:{oid}", (cx - 20, cy - 22),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
 
-        # Count overlay on every frame
-        total   = tracker.max_id_seen
+        # ── Peak simultaneous count (correct flock size) ──────────────────────
+        current_visible = len(tracker.objects)
+        if current_visible > peak_simultaneous_count:
+            peak_simultaneous_count = current_visible
+
+        # Count overlay — show current visible hens on frame
         s_scale = max(0.55, width * 0.001)
-        summary = f"Hens Detected: {total}"
+        summary = f"Hens Detected: {peak_simultaneous_count} (now: {current_visible})"
         (sw2, _), _ = cv2.getTextSize(summary, cv2.FONT_HERSHEY_SIMPLEX, s_scale, 2)
         cv2.rectangle(annotated_frame, (5, 5), (sw2 + 14, 34), (0, 0, 0), -1)
         cv2.putText(annotated_frame, summary, (9, 28), cv2.FONT_HERSHEY_SIMPLEX, s_scale, (0, 255, 0), 2)
@@ -407,7 +413,7 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         out.write(annotated_frame)
         frame_idx += 1
 
-    total_count = tracker.max_id_seen
+    total_count = peak_simultaneous_count  # ✅ Correct: max simultaneously visible
     cap.release()
     out.release()
 
