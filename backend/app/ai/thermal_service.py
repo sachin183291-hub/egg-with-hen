@@ -471,10 +471,11 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
         if not cap.isOpened():
             return
 
-    tracker = CentroidTracker(max_disappeared=15, max_distance=80)
+    tracker                 = CentroidTracker(max_disappeared=15, max_distance=80)
+    peak_simultaneous_count = 0   # max hens visible at same time
 
     os.makedirs("storage", exist_ok=True)
-    timestamp     = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_video_path = f"storage/drone_record_{timestamp}.mp4"
     out: cv2.VideoWriter | None = None
     frame_idx = 0
@@ -502,11 +503,15 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
                     cv2.putText(annotated, f"ID:{oid}", (cx - 20, cy - 22),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
 
-            # Count overlay
-            total = tracker.max_id_seen
-            cv2.rectangle(annotated, (5, 5), (260, 36), (0, 0, 0), -1)
-            cv2.putText(annotated, f"Live Hens: {total}", (9, 28),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            # ── Peak simultaneous count (correct flock size) ──────────────
+            current_visible = len(tracker.objects)
+            if current_visible > peak_simultaneous_count:
+                peak_simultaneous_count = current_visible
+
+            # Count overlay — show peak & current
+            cv2.rectangle(annotated, (5, 5), (340, 36), (0, 0, 0), -1)
+            cv2.putText(annotated, f"Live Hens: {peak_simultaneous_count} (now: {current_visible})",
+                        (9, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
 
             if out:
                 out.write(annotated)
@@ -521,4 +526,4 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
         if out:
             out.release()
         LATEST_STREAM_RECORD["video_path"]  = out_video_path
-        LATEST_STREAM_RECORD["final_count"] = tracker.max_id_seen
+        LATEST_STREAM_RECORD["final_count"] = peak_simultaneous_count  # ✅ correct count
