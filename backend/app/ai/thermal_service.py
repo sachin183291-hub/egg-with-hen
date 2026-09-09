@@ -222,8 +222,10 @@ def detect_thermal_hotspots(
         local_max = cv2.dilate(roi_blurred, np.ones((k, k), np.uint8))
         peaks_mask = (roi_blurred == local_max) & (roi_mask > 0) & (roi_blurred > 50)
         
-        num_peaks, _, _, peak_centroids = cv2.connectedComponentsWithStats(np.uint8(peaks_mask) * 255)
-        n_hens = max(1, num_peaks - 1)
+        num_peaks, _, stats, peak_centroids = cv2.connectedComponentsWithStats(np.uint8(peaks_mask) * 255)
+        # Filter out tiny noise components (area < 2 pixels)
+        real_peaks = sum(1 for i in range(1, num_peaks) if stats[i, cv2.CC_STAT_AREA] >= 2)
+        n_hens = max(1, real_peaks)
 
         if n_hens == 1:
             rects.append((x1, y1, x2, y2))
@@ -329,30 +331,43 @@ def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: 
 
 # ─────────────────────────────────────────────────────────────────────────────
 def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
-    temp_dir        = tempfile.gettempdir()
-    input_path      = os.path.join(temp_dir, "input_thermal.mp4")
-    output_path_mp4 = os.path.join(temp_dir, "output_thermal.mp4")
-    output_path_avi = os.path.join(temp_dir, "output_thermal.avi")
+    """
+    Accept raw video bytes (from the API upload), write to a temp file,
+    process frame-by-frame, and return the annotated output video path + count.
+    """
+    # ── Write incoming bytes to a temp input file ────────────────────────────
+    suffix_in  = ".mp4"
+    tmp_in     = tempfile.NamedTemporaryFile(delete=False, suffix=suffix_in)
+    tmp_in.write(video_bytes)
+    tmp_in.flush()
+    tmp_in.close()
+    input_path = tmp_in.name
 
-    with open(input_path, "wb") as f:
-        f.write(video_bytes)
+    # ── Prepare output path ──────────────────────────────────────────────────
+    tmp_out_mp4 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    tmp_out_mp4.close()
+    output_path_mp4 = tmp_out_mp4.name
+
+    tmp_out_avi = tempfile.NamedTemporaryFile(delete=False, suffix=".avi")
+    tmp_out_avi.close()
+    output_path_avi = tmp_out_avi.name
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
-        raise ValueError("Could not open video file.")
+        raise ValueError("Could not open uploaded thermal video.")
 
-    fps    = max(cap.get(cv2.CAP_PROP_FPS), 1.0) or 25.0
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    # Find a working codec
-    out = None
+    out: cv2.VideoWriter | None = None
     final_output = output_path_mp4
+
     for codec_str, out_path in [("mp4v", output_path_mp4), ("MJPG", output_path_avi), ("DIVX", output_path_avi)]:
-        fourcc = cv2.VideoWriter_fourcc(*codec_str)
+        fourcc    = cv2.VideoWriter_fourcc(*codec_str)
         candidate = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
         if candidate.isOpened():
-            out = candidate
+            out          = candidate
             final_output = out_path
             break
         candidate.release()
@@ -361,9 +376,9 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         cap.release()
         raise ValueError("Could not open VideoWriter with any available codec.")
 
-    tracker    = CentroidTracker(max_disappeared=5, max_distance=80)
-    frame_idx  = 0
-    SKIP       = 15   # process every 15th frame (fast enough to avoid timeouts)
+    tracker   = CentroidTracker(max_disappeared=5, max_distance=80)
+    frame_idx = 0
+    SKIP      = 15  # process every 15th frame (fast enough to avoid timeouts)
 
     while True:
         ret, frame = cap.read()
@@ -396,6 +411,7 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
     cap.release()
     out.release()
 
+    # Clean up temp input file
     try:
         os.remove(input_path)
     except Exception:
