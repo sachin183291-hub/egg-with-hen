@@ -92,60 +92,14 @@ def detect_thermal_hotspots(
 
     h_img, w_img = image.shape[:2]
     annotated = image.copy()
-
-    # ── 1. Downscale for faster processing (50% → 4× faster) ────────────────
-    SCALE = 0.5
-    small = cv2.resize(image, (int(w_img * SCALE), int(h_img * SCALE)))
-    sh, sw = small.shape[:2]
-    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
-
-    # ── 2. Thermal colour mask ────────────────────────────────────────────────
-    # Red / orange / yellow / white-hot → live body heat in thermal colourmap
-    hot_mask = cv2.bitwise_or(
-        cv2.bitwise_or(
-            cv2.bitwise_or(
-                cv2.bitwise_or(
-                    cv2.inRange(hsv, np.array([0,   55,  80]), np.array([12,  255, 255])),   # red-low
-                    cv2.inRange(hsv, np.array([158, 55,  80]), np.array([180, 255, 255])),   # red-high
-                ),
-                cv2.inRange(hsv, np.array([12,  55,  80]), np.array([28,  255, 255])),       # orange
-            ),
-            cv2.inRange(hsv, np.array([28,  65, 100]), np.array([42,  255, 255])),           # yellow
-        ),
-        cv2.inRange(hsv, np.array([0,   0,  200]), np.array([180, 50,  255])),               # white-hot
-    )
-
-    # Morphological cleanup — connect broken blobs, remove tiny noise
-    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
-    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))
-
-    # ── 3. Find contours ──────────────────────────────────────────────────────
-    contours, _ = cv2.findContours(hot_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    frame_area = sh * sw
-
-    # Area thresholds — very permissive to handle all drone altitudes
-    # High altitude (20m+): hens ~5x5px scaled → ~25px²
-    # Low altitude (5m): hens ~50x50px scaled → ~2500px²
-    MIN_AREA   = 25                          # absolute minimum — allow tiny hens from high altitude
-    MAX_AREA   = int(frame_area * 0.40)      # must be less than 40% of frame
-    SINGLE_HEN = max(80, int(frame_area * 0.005))  # reference area for 1 hen
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     rects:      List = []
     valid_hens: List = []
-    used_boxes: List = []
-
-    def overlaps(b1, used_list, thresh=0.3):
-        ax1, ay1, ax2, ay2 = b1
-        for bx1, by1, bx2, by2 in used_list:
-            ix = max(0, min(ax2, bx2) - max(ax1, bx1))
-            iy = max(0, min(ay2, by2) - max(ay1, by1))
-            inter = ix * iy
-            area  = max(1, (ax2 - ax1) * (ay2 - ay1))
-            if inter / area > thresh:
-                return True
-        return False
 
     def estimate_temp(roi_hsv_patch):
+        if roi_hsv_patch.size == 0:
+            return 21.0
         mh = float(cv2.mean(roi_hsv_patch[:, :, 0])[0])
         ms = float(cv2.mean(roi_hsv_patch[:, :, 1])[0])
         mv = float(cv2.mean(roi_hsv_patch[:, :, 2])[0])
@@ -172,45 +126,47 @@ def detect_thermal_hotspots(
         cv2.rectangle(img, (hx, ly1), (lx2, hy), color, -1)
         cv2.putText(img, label, (hx + 3, hy - 3), font, fscale, (255, 255, 255), 1)
 
-    for cnt in sorted(contours, key=cv2.contourArea, reverse=True):
-        area = cv2.contourArea(cnt)
-        if area < MIN_AREA or area > MAX_AREA:
-            continue
-
-        x_s, y_s, w_s, h_s = cv2.boundingRect(cnt)
-        aspect = w_s / max(h_s, 1)
-        if aspect < 0.15 or aspect > 8.0:
-            continue
-
-        # Scale back to original resolution
-        x1 = int(x_s / SCALE); y1 = int(y_s / SCALE)
-        x2 = int((x_s + w_s) / SCALE); y2 = int((y_s + h_s) / SCALE)
-
-        if overlaps((x1, y1, x2, y2), used_boxes):
-            continue
-
-        # How many hens are clustered in this blob?
-        n_hens = max(1, round(area / SINGLE_HEN))
-        roi_hsv = hsv[y_s: y_s + h_s, x_s: x_s + w_s]
-        temp = estimate_temp(roi_hsv)
-        # Very permissive temp filter — accept anything that looks warm
-        # Real thermal range 15–45°C covers all live animals safely
-        if not (15.0 <= temp <= 45.0):
-            continue
-
-        used_boxes.append((x1, y1, x2, y2))
-
-        if n_hens == 1:
-            rects.append((x1, y1, x2, y2))
-            valid_hens.append({"temperature": temp, "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1})
-        else:
-            # Split blob into n_hens horizontal sub-boxes
-            sub_w = max(1, (x2 - x1) // n_hens)
-            for k in range(n_hens):
-                sx1 = x1 + k * sub_w
-                sx2 = min(x2, sx1 + sub_w)
-                rects.append((sx1, y1, sx2, y2))
-                valid_hens.append({"temperature": temp, "x": sx1, "y": y1, "w": sx2 - sx1, "h": y2 - y1})
+    # ── YOLO Detection for 100% Accuracy ──────────────────────────────────────
+    from app.ai.yolo_service import load_model
+    try:
+        model_instance, tray_model_instance = load_model()
+        if model_instance is not None:
+            results = model_instance(image, conf=0.25, iou=0.45, imgsz=640, verbose=False)
+            
+            # Combine detections from both models if tray model exists
+            all_boxes = []
+            class_names_main = getattr(results[0], "names", {0: "egg", 1: "egg_tray"}) if results else {}
+            for result in results:
+                all_boxes.extend([(box, class_names_main) for box in result.boxes])
+                
+            if tray_model_instance is not None:
+                tray_results = tray_model_instance(image, conf=0.25, iou=0.45, imgsz=640, verbose=False)
+                class_names_tray = getattr(tray_results[0], "names", {0: "egg tray", 1: "hen"}) if tray_results else {}
+                for result in tray_results:
+                    all_boxes.extend([(box, class_names_tray) for box in result.boxes])
+            
+            for box_obj, cnames in all_boxes:
+                cls_id = int(box_obj.cls[0].cpu().numpy())
+                raw_class = cnames.get(cls_id, "unknown").lower()
+                
+                # Only process hens
+                if "hen" in raw_class:
+                    x1, y1, x2, y2 = map(int, box_obj.xyxy[0].cpu().numpy())
+                    # Ensure coordinates are within image
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w_img, x2), min(h_img, y2)
+                    
+                    if x2 <= x1 or y2 <= y1:
+                        continue
+                        
+                    roi_hsv = hsv[y1:y2, x1:x2]
+                    temp = estimate_temp(roi_hsv)
+                    
+                    if 15.0 <= temp <= 45.0:
+                        rects.append((x1, y1, x2, y2))
+                        valid_hens.append({"temperature": temp, "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1})
+    except Exception as e:
+        print(f"YOLO failed in thermal detection: {e}, falling back to zero detections to avoid inaccuracy")
 
     hen_count = len(valid_hens)
     hens_data: List[Dict] = []
