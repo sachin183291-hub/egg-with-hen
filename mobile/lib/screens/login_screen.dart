@@ -71,8 +71,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               offset: const Offset(0, 8))
                         ],
                       ),
-                      child: const Center(
-                          child: Text('🛡️', style: TextStyle(fontSize: 36))),
+                      child: Center(
+                          child: Image.asset('assets/images/logo.png', width: 48, height: 48)),
                     ),
                     const SizedBox(height: 16),
                     const Text('GioTag',

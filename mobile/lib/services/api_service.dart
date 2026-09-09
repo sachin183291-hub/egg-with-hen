@@ -59,7 +59,7 @@ class ApiService {
 
   static Future<http.Response> _get(String path) async {
     final headers = await _authHeaders();
-    final res = await http.get(Uri.parse('$_baseUrl$path'), headers: headers);
+    final res = await http.get(Uri.parse('$_baseUrl$path'), headers: headers).timeout(const Duration(seconds: 5));
     if (res.statusCode == 401) return _refreshAndRetry(() => _get(path));
     return res;
   }
@@ -70,7 +70,7 @@ class ApiService {
       Uri.parse('$_baseUrl$path'),
       headers: headers,
       body: jsonEncode(body),
-    );
+    ).timeout(const Duration(seconds: 5));
     if (res.statusCode == 401) return _refreshAndRetry(() => _post(path, body));
     return res;
   }
@@ -82,7 +82,7 @@ class ApiService {
       Uri.parse('$_baseUrl/api/auth/login'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'password': password}),
-    );
+    ).timeout(const Duration(seconds: 5));
 
     if (res.statusCode == 200) {
       final data = jsonDecode(res.body) as Map<String, dynamic>;
