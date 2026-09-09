@@ -200,27 +200,64 @@ def detect_thermal_hotspots(
         if overlaps((x1, y1, x2, y2), used_boxes):
             continue
 
-        # Intelligent adaptive counting based on median size
-        n_hens = max(1, round(area / SINGLE_HEN))
         roi_hsv = hsv[y_s: y_s + h_s, x_s: x_s + w_s]
         roi_mask = hot_mask[y_s: y_s + h_s, x_s: x_s + w_s]
-        temp = estimate_temp(roi_hsv, roi_mask)
         
+        # Check overall blob temperature first
+        temp = estimate_temp(roi_hsv, roi_mask)
         if not (15.0 <= temp <= 45.0):
             continue
 
         used_boxes.append((x1, y1, x2, y2))
 
+        # ── Local Maxima (Peak Finding) to count hens in clustered blobs ──
+        # Extract V-channel for brightness/heat
+        roi_v = roi_hsv[:, :, 2]
+        roi_blurred = cv2.GaussianBlur(roi_v, (5, 5), 0)
+        
+        # Distance between peaks should be roughly the size of a hen
+        k = int(math.sqrt(SINGLE_HEN) * 0.7) | 1
+        k = max(3, min(25, k))
+        
+        local_max = cv2.dilate(roi_blurred, np.ones((k, k), np.uint8))
+        peaks_mask = (roi_blurred == local_max) & (roi_mask > 0) & (roi_blurred > 50)
+        
+        num_peaks, _, _, peak_centroids = cv2.connectedComponentsWithStats(np.uint8(peaks_mask) * 255)
+        n_hens = max(1, num_peaks - 1)
+
         if n_hens == 1:
             rects.append((x1, y1, x2, y2))
             valid_hens.append({"temperature": temp, "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1})
         else:
-            sub_w = max(1, (x2 - x1) // n_hens)
-            for k in range(n_hens):
-                sx1 = x1 + k * sub_w
-                sx2 = min(x2, sx1 + sub_w)
-                rects.append((sx1, y1, sx2, y2))
-                valid_hens.append({"temperature": temp, "x": sx1, "y": y1, "w": sx2 - sx1, "h": y2 - y1})
+            # We found multiple distinct heat cores! 
+            # We'll create a bounding box centered around each core.
+            box_side = int(math.sqrt(area / n_hens) / SCALE)
+            for i in range(1, num_peaks):
+                px_small, py_small = peak_centroids[i]
+                # Scale peak to original image coordinates
+                px = int((x_s + px_small) / SCALE)
+                py = int((y_s + py_small) / SCALE)
+                
+                sx1 = max(x1, px - box_side // 2)
+                sy1 = max(y1, py - box_side // 2)
+                sx2 = min(x2, px + box_side // 2)
+                sy2 = min(y2, py + box_side // 2)
+                
+                # Double check bounds
+                if sx2 <= sx1: sx2 = sx1 + 5
+                if sy2 <= sy1: sy2 = sy1 + 5
+                
+                rects.append((sx1, sy1, sx2, sy2))
+                
+                # We could estimate temp exactly for this small box, but the blob average is usually fine.
+                # Let's do exact temp for perfection!
+                sub_roi_hsv = hsv[max(0, int(sy1*SCALE)) : min(sh, int(sy2*SCALE)), 
+                                  max(0, int(sx1*SCALE)) : min(sw, int(sx2*SCALE))]
+                sub_roi_mask = hot_mask[max(0, int(sy1*SCALE)) : min(sh, int(sy2*SCALE)), 
+                                        max(0, int(sx1*SCALE)) : min(sw, int(sx2*SCALE))]
+                sub_temp = estimate_temp(sub_roi_hsv, sub_roi_mask) if cv2.countNonZero(sub_roi_mask) > 0 else temp
+                
+                valid_hens.append({"temperature": sub_temp, "x": sx1, "y": sy1, "w": sx2 - sx1, "h": sy2 - sy1})
 
     hen_count = len(valid_hens)
     hens_data: List[Dict] = []
