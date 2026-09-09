@@ -6,18 +6,18 @@ export default function ThermalCameraPage() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [isVideo, setIsVideo] = useState(false)
-  
+
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
-  
+
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null)
-  
+
   // Live Stream State
   const [activeTab, setActiveTab] = useState<'upload' | 'live'>('upload')
   const [liveStreamIp, setLiveStreamIp] = useState<string | null>(null)
   const [isLiveConnected, setIsLiveConnected] = useState(false)
-  const [finalRecord, setFinalRecord] = useState<{count: number, videoUrl: string} | null>(null)
+  const [finalRecord, setFinalRecord] = useState<{ count: number, videoUrl: string } | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const API_URL = import.meta.env.VITE_API_URL || ''
 
@@ -32,7 +32,7 @@ export default function ThermalCameraPage() {
       setError("No Drone IP found. Please configure it in the Drone Control menu first.")
     }
   }
-  
+
   const handleStopStream = async () => {
     setIsLiveConnected(false)
     setIsSaving(true)
@@ -67,7 +67,7 @@ export default function ThermalCameraPage() {
     if (!selectedImage) return
     setIsAnalyzing(true)
     setError(null)
-    
+
     try {
       const formData = new FormData()
       formData.append('image', selectedImage)
@@ -79,7 +79,7 @@ export default function ThermalCameraPage() {
         const videoBlob = new Blob([response.data], { type: 'video/mp4' })
         const url = URL.createObjectURL(videoBlob)
         setProcessedVideoUrl(url)
-        
+
         const countHeader = response.headers['x-hen-count']
         setResult({ hen_count: countHeader ? parseInt(countHeader, 10) : 0, is_video: true })
       } else {
@@ -141,24 +141,24 @@ export default function ThermalCameraPage() {
           <h3 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Camera size={20} className="text-brand" /> Original View
           </h3>
-          
+
           <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-            <button 
-              onClick={() => setActiveTab('upload')} 
+            <button
+              onClick={() => setActiveTab('upload')}
               className={`btn ${activeTab === 'upload' ? 'btn-primary' : 'btn-secondary'}`}
               style={{ flex: 1 }}
             >
               <UploadCloud size={18} style={{ marginRight: 8 }} /> Upload Media
             </button>
-            <button 
-              onClick={() => setActiveTab('live')} 
+            <button
+              onClick={() => setActiveTab('live')}
               className={`btn ${activeTab === 'live' ? 'btn-primary' : 'btn-secondary'}`}
               style={{ flex: 1 }}
             >
               <Video size={18} style={{ marginRight: 8 }} /> Live Drone Feed
             </button>
           </div>
-          
+
           {activeTab === 'upload' && !previewUrl && (
             <label style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -171,7 +171,7 @@ export default function ThermalCameraPage() {
               <input type="file" accept="image/*,video/*" onChange={handleImageUpload} style={{ display: 'none' }} />
             </label>
           )}
-          
+
           {activeTab === 'live' && !isLiveConnected && !finalRecord && (
             <div style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -188,12 +188,12 @@ export default function ThermalCameraPage() {
 
           {activeTab === 'live' && isLiveConnected && liveStreamIp && (
             <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)' }}>
-              <img 
-                src={`${API_URL}/api/ai/drone-stream?ip=${encodeURIComponent(liveStreamIp)}`} 
-                alt="Live Thermal Stream" 
-                style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} 
+              <img
+                src={`${API_URL}/api/ai/drone-stream?ip=${encodeURIComponent(liveStreamIp)}`}
+                alt="Live Thermal Stream"
+                style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }}
               />
-              <button 
+              <button
                 onClick={handleStopStream}
                 disabled={isSaving}
                 className="btn btn-danger"
@@ -211,15 +211,15 @@ export default function ThermalCameraPage() {
 
           {activeTab === 'live' && finalRecord && (
             <div style={{ borderRadius: '12px', padding: '24px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border)', textAlign: 'center' }}>
-               <h2 style={{ color: '#ef4444', marginBottom: '8px' }}>Final Count: {finalRecord.count} Hens</h2>
-               <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Stream recorded and analyzed successfully.</p>
-               <video src={finalRecord.videoUrl} controls style={{ width: '100%', maxHeight: '300px', borderRadius: '8px' }}></video>
-               <button className="btn btn-secondary" onClick={() => setFinalRecord(null)} style={{ marginTop: '16px' }}>
-                 Start New Session
-               </button>
+              <h2 style={{ color: '#ef4444', marginBottom: '8px' }}>Final Count: {finalRecord.count} Hens</h2>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>Stream recorded and analyzed successfully.</p>
+              <video src={finalRecord.videoUrl} controls style={{ width: '100%', maxHeight: '300px', borderRadius: '8px' }}></video>
+              <button className="btn btn-secondary" onClick={() => setFinalRecord(null)} style={{ marginTop: '16px' }}>
+                Start New Session
+              </button>
             </div>
           )}
-          
+
           {activeTab === 'upload' && previewUrl && (
             <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)' }}>
               {isVideo ? (
@@ -227,10 +227,10 @@ export default function ThermalCameraPage() {
               ) : (
                 <img src={previewUrl} alt="Selected view" style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
               )}
-              <button 
+              <button
                 onClick={reset}
                 style={{
-                  position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', 
+                  position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)',
                   border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backdropFilter: 'blur(4px)'
                 }}
@@ -247,8 +247,8 @@ export default function ThermalCameraPage() {
           )}
 
           {activeTab === 'upload' && previewUrl && !result && (
-            <button 
-              onClick={startAnalysis} 
+            <button
+              onClick={startAnalysis}
               disabled={isAnalyzing}
               className="btn btn-primary"
               style={{ width: '100%', padding: '14px', fontSize: '1.1rem', display: 'flex', justifyContent: 'center', gap: '10px' }}
@@ -280,7 +280,7 @@ export default function ThermalCameraPage() {
               <p>Upload media to see the thermal detection.</p>
             </div>
           )}
-          
+
           {!result && !isAnalyzing && activeTab === 'live' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', opacity: 0.5 }}>
               <Activity size={64} color="var(--text-muted)" style={{ marginBottom: '16px' }} />
@@ -307,7 +307,7 @@ export default function ThermalCameraPage() {
                   <div style={{ fontSize: '0.8rem', color: '#ef4444', marginTop: '4px' }}>Temperature filter: 20°C – 40°C</div>
                 </div>
                 <div style={{ flex: 1, textAlign: 'right', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                  {result.hen_count > 0 
+                  {result.hen_count > 0
                     ? `Avg: ${(result.hens?.reduce((a: number, h: any) => a + h.temperature, 0) / (result.hens?.length || 1)).toFixed(1)}°C`
                     : 'No hens detected in range'}
                 </div>
@@ -360,9 +360,9 @@ export default function ThermalCameraPage() {
               )}
 
               {isVideo && processedVideoUrl && (
-                 <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', marginTop: '16px' }}>
-                    <video src={processedVideoUrl} controls autoPlay loop style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
-                 </div>
+                <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', marginTop: '16px' }}>
+                  <video src={processedVideoUrl} controls autoPlay loop style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
+                </div>
               )}
 
               {!isVideo && result.result_image && (
@@ -374,8 +374,9 @@ export default function ThermalCameraPage() {
           )}
         </div>
       </div>
-      
-      <style dangerouslySetInnerHTML={{__html: `
+
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes pulse-red {
           0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
           70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }

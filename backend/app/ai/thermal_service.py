@@ -123,10 +123,12 @@ def detect_thermal_hotspots(
     contours, _ = cv2.findContours(hot_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     frame_area = sh * sw
 
-    # Area thresholds — tuned for drone altitude (~5m–30m above poultry farm)
-    MIN_AREA   = max(120, int(frame_area * 0.002))   # too small → noise
-    MAX_AREA   = int(frame_area * 0.30)              # too large → background
-    SINGLE_HEN = max(250, int(frame_area * 0.010))   # reference area for 1 hen
+    # Area thresholds — very permissive to handle all drone altitudes
+    # High altitude (20m+): hens ~5x5px scaled → ~25px²
+    # Low altitude (5m): hens ~50x50px scaled → ~2500px²
+    MIN_AREA   = 25                          # absolute minimum — allow tiny hens from high altitude
+    MAX_AREA   = int(frame_area * 0.40)      # must be less than 40% of frame
+    SINGLE_HEN = max(80, int(frame_area * 0.005))  # reference area for 1 hen
 
     rects:      List = []
     valid_hens: List = []
@@ -191,7 +193,9 @@ def detect_thermal_hotspots(
         n_hens = max(1, round(area / SINGLE_HEN))
         roi_hsv = hsv[y_s: y_s + h_s, x_s: x_s + w_s]
         temp = estimate_temp(roi_hsv)
-        if not (min_temp <= temp <= max_temp):
+        # Very permissive temp filter — accept anything that looks warm
+        # Real thermal range 15–45°C covers all live animals safely
+        if not (15.0 <= temp <= 45.0):
             continue
 
         used_boxes.append((x1, y1, x2, y2))

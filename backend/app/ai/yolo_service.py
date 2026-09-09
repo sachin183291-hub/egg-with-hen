@@ -67,10 +67,10 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
             cls_id = int(box.cls[0].cpu().numpy())
             
             raw_class_name = class_names.get(cls_id, "unknown").lower()
-            if is_tray_only or "tray" in raw_class_name:
-                class_name = "egg_tray"
-            elif "hen" in raw_class_name:
+            if "hen" in raw_class_name:
                 class_name = "hen"
+            elif is_tray_only or "tray" in raw_class_name:
+                class_name = "egg_tray"
             elif "egg" in raw_class_name:
                 class_name = "egg"
             else:
