@@ -151,19 +151,19 @@ def detect_thermal_hotspots(
 
     def estimate_temp(roi_hsv_patch, roi_mask):
         if cv2.countNonZero(roi_mask) == 0:
-            return 0.0  # return 0 so it gets filtered out by the temp check below
+            return 0.0
         mh = float(cv2.mean(roi_hsv_patch[:, :, 0], mask=roi_mask)[0])
         ms = float(cv2.mean(roi_hsv_patch[:, :, 1], mask=roi_mask)[0])
         mv = float(cv2.mean(roi_hsv_patch[:, :, 2], mask=roi_mask)[0])
         if ms < 50 and mv > 200:
-            return 40.0   # white-hot core → very hot hen
+            return 40.0   # white-hot core
         if mh >= 158 or mh <= 5:
             return 36.0 + min(1.0, mv / 255.0) * 5.0   # red → 36-41°C
         if mh <= 28:
-            return 31.0 + (1.0 - (mh - 5) / 23.0) * 7.0  # orange → 31-38°C
-        if mh <= 42:
-            return 28.0 + (1.0 - (mh - 28) / 14.0) * 4.0  # yellow → 28-32°C
-        return 0.0  # green/blue = cold background, filter it out
+            return 28.0 + (1.0 - (mh - 5) / 23.0) * 8.0  # orange → 28-36°C
+        if mh <= 45:
+            return 20.0 + (1.0 - (mh - 28) / 17.0) * 8.0  # yellow/greenish → 20-28°C
+        return 0.0  # green/blue = cold background
 
     def draw_box(img, hx, hy, hw, hh, label, temp):
         norm  = min(1.0, max(0.0, (temp - min_temp) / max(max_temp - min_temp, 1)))
@@ -214,10 +214,9 @@ def detect_thermal_hotspots(
         roi_hsv = hsv[y_s: y_s + h_s, x_s: x_s + w_s]
         roi_mask = hot_mask[y_s: y_s + h_s, x_s: x_s + w_s]
         
-        # Check overall blob temperature — hens are 30°C–42°C body temp range
-        # Tighter range avoids background thermal artifacts from ground/equipment
+        # Check overall blob temperature
         temp = estimate_temp(roi_hsv, roi_mask)
-        if not (30.0 <= temp <= 42.0):  # real hen body heat only
+        if not (min_temp <= temp <= max_temp):  # respect dynamic UI slider
             continue
 
         used_boxes.append((x1, y1, x2, y2))
