@@ -89,78 +89,47 @@ class CentroidTracker:
         return self.objects
 
 def detect_thermal_hotspots(image: np.ndarray, min_temp: float = 20.0, max_temp: float = 40.0, tracker: CentroidTracker = None) -> Tuple[np.ndarray, int, List[Dict]]:
+    from app.ai.yolo_service import detect_objects_image
+    
     h_img, w_img = image.shape[:2]
     annotated = image.copy()
-    
-    roi_mask = np.zeros(image.shape[:2], dtype=np.uint8)
-    top_margin    = int(h_img * 0.08)
-    bottom_margin = int(h_img * 0.92)
-    left_margin   = int(w_img * 0.02)
-    right_margin  = int(w_img * 0.80)
-    
-    roi_mask[top_margin:bottom_margin, left_margin:right_margin] = 255
-    
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     
-    mask_red_low  = cv2.inRange(hsv, np.array([0,   80, 80]),  np.array([12,  255, 255]))
-    mask_red_high = cv2.inRange(hsv, np.array([158, 80, 80]),  np.array([180, 255, 255]))
-    mask_orange   = cv2.inRange(hsv, np.array([12,  80, 80]),  np.array([28,  255, 255]))
-    mask_yellow   = cv2.inRange(hsv, np.array([28,  90, 100]), np.array([42,  255, 255]))
-    mask_white    = cv2.inRange(hsv, np.array([0,    0, 210]), np.array([180, 45,  255]))
-    
-    hot_mask = cv2.bitwise_or(mask_red_low,  mask_red_high)
-    hot_mask = cv2.bitwise_or(hot_mask,       mask_orange)
-    hot_mask = cv2.bitwise_or(hot_mask,       mask_yellow)
-    hot_mask = cv2.bitwise_or(hot_mask,       mask_white)
-    hot_mask = cv2.bitwise_and(hot_mask, roi_mask)
-    
-    kernel_close = np.ones((7, 7), np.uint8)
-    kernel_open  = np.ones((3, 3), np.uint8)
-    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, kernel_close)
-    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_OPEN,  kernel_open)
-    
-    contours, _ = cv2.findContours(hot_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    frame_area = h_img * w_img
-    used_boxes = []
-    
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
-    
+    try:
+        yolo_result = detect_objects_image(image)
+        detections = yolo_result.get("detections", [])
+    except Exception as e:
+        print(f"YOLO detection error: {e}")
+        detections = []
+        
     rects = []
     valid_hens = []
     
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < 300 or area > frame_area * 0.18:
+    for det in detections:
+        # We only care about hens (YOLO may return egg, tray, etc.)
+        # Allow 'bird' as well in case the fallback yolov8n model is used
+        if det["class"] not in ["hen", "bird"]:
             continue
             
-        x, y, w, h = cv2.boundingRect(contour)
-        aspect_ratio = float(w) / float(h) if h > 0 else 0
-        if aspect_ratio < 0.20 or aspect_ratio > 6.0:
-            continue
-            
-        def iou(a, b):
-            ax1, ay1, ax2, ay2 = a[0], a[1], a[0]+a[2], a[1]+a[3]
-            bx1, by1, bx2, by2 = b[0], b[1], b[0]+b[2], b[1]+b[3]
-            ix1, iy1 = max(ax1, bx1), max(ay1, by1)
-            ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-            inter = max(0, ix2-ix1) * max(0, iy2-iy1)
-            union = (ax2-ax1)*(ay2-ay1) + (bx2-bx1)*(by2-by1) - inter
-            return inter / union if union > 0 else 0
-            
-        if any(iou((x, y, w, h), ub) > 0.35 for ub in used_boxes):
-            continue
-            
-        blob_hsv     = hsv[y:y+h, x:x+w]
-        blob_mask_roi = hot_mask[y:y+h, x:x+w]
+        x, y, x2, y2 = det["bbox"]
         
-        if cv2.countNonZero(blob_mask_roi) == 0:
+        # Ensure bounds
+        x, y = max(0, x), max(0, y)
+        x2, y2 = min(w_img, x2), min(h_img, y2)
+        w = x2 - x
+        h = y2 - y
+        
+        if w <= 0 or h <= 0:
             continue
             
-        mean_hue = cv2.mean(blob_hsv[:, :, 0], mask=blob_mask_roi)[0]
-        mean_val = cv2.mean(blob_hsv[:, :, 2], mask=blob_mask_roi)[0]
-        mean_sat = cv2.mean(blob_hsv[:, :, 1], mask=blob_mask_roi)[0]
+        # Get thermal signature from the YOLO box
+        blob_hsv = hsv[y:y+h, x:x+w]
         
+        mean_hue = cv2.mean(blob_hsv[:, :, 0])[0]
+        mean_sat = cv2.mean(blob_hsv[:, :, 1])[0]
+        mean_val = cv2.mean(blob_hsv[:, :, 2])[0]
+        
+        # Same heuristic for temperature
         if mean_sat < 45 and mean_val > 210:
             estimated_temp = 38.5
         elif mean_hue >= 158 or mean_hue <= 5:
@@ -176,8 +145,7 @@ def detect_thermal_hotspots(image: np.ndarray, min_temp: float = 20.0, max_temp:
             estimated_temp = 21.0
             
         if min_temp <= estimated_temp <= max_temp:
-            used_boxes.append((x, y, w, h))
-            rects.append((x, y, x + w, y + h))
+            rects.append((x, y, x2, y2))
             valid_hens.append({
                 "temperature": estimated_temp,
                 "x": x, "y": y, "w": w, "h": h

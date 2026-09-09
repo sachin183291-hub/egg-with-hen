@@ -31,21 +31,16 @@ def load_model():
             raise e
     return model, tray_model
 
-def detect_objects(image_bytes: bytes, conf_threshold: float = 0.35, iou_threshold: float = 0.45) -> dict:
+def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_threshold: float = 0.45) -> dict:
     """
-    Runs YOLO inference on the image bytes and returns detection results for eggs and trays,
-    and a base64 annotated image.
+    Runs YOLO inference on a raw OpenCV image array and returns detection results.
     """
     model_instance, tray_model_instance = load_model()
     if not model_instance:
         raise ValueError("Failed to load YOLO model.")
 
-    # Decode image from bytes
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    
     if image is None:
-        raise ValueError("Could not decode image bytes.")
+        raise ValueError("Image array is None.")
 
     # Run inference for main model
     results = model_instance(image, conf=conf_threshold, iou=iou_threshold, imgsz=640)
@@ -150,5 +145,18 @@ def detect_objects(image_bytes: bytes, conf_threshold: float = 0.35, iou_thresho
         "egg_count": egg_count,
         "confidence": round(final_conf, 3),
         "detections": detections,
-        "result_image": encoded_img
+        "result_image": encoded_img,
+        "annotated_frame": annotated_image # useful for live stream drawing
     }
+
+def detect_objects(image_bytes: bytes, conf_threshold: float = 0.35, iou_threshold: float = 0.45) -> dict:
+    """
+    Runs YOLO inference on the image bytes and returns detection results for eggs and trays,
+    and a base64 annotated image.
+    """
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Could not decode image bytes.")
+        
+    return detect_objects_image(image, conf_threshold, iou_threshold)
