@@ -7,7 +7,7 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const api = axios.create({
   baseURL: API_URL,
-  timeout: 5000,
+  timeout: 30000,  // 30s default — enough for image analysis
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -109,9 +109,15 @@ export const aiApi = {
   analyzeEggImage: (formData: FormData) => api.post('/api/ai/analyze-egg-image', formData),
   /** OpenAI Chat: POST /api/ai/chat-analyze */
   chatAnalyze: (formData: FormData) => api.post('/api/ai/chat-analyze', formData),
-  /** Thermal Analyze: POST /api/ai/thermal-analyze */
-  thermalAnalyze: (formData: FormData) => api.post('/api/ai/thermal-analyze', formData),
-  thermalAnalyzeVideo: (formData: FormData) => api.post('/api/ai/thermal-analyze', formData, { responseType: 'blob' }),
+  /** Thermal Analyze: POST /api/ai/thermal-analyze (image) */
+  thermalAnalyze: (formData: FormData) =>
+    api.post('/api/ai/thermal-analyze', formData, { timeout: 60000 }),  // 60s for image
+  /** Thermal Analyze Video: POST /api/ai/thermal-analyze (video) — long timeout */
+  thermalAnalyzeVideo: (formData: FormData) =>
+    api.post('/api/ai/thermal-analyze', formData, {
+      responseType: 'blob',
+      timeout: 600000,  // 10 minutes for video processing
+    }),
 }
 
 // ─── Blockchain ───────────────────────────────────────────────────────────────

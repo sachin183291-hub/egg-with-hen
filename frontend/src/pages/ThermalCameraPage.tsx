@@ -256,7 +256,7 @@ export default function ThermalCameraPage() {
               {isAnalyzing ? (
                 <>
                   <div className="spinner" style={{ width: '20px', height: '20px', borderTopColor: 'white' }}></div>
-                  Applying Thermal Filter & Counting...
+                  {isVideo ? 'Processing Video with YOLO AI... (may take 1-3 mins)' : 'Applying Thermal Filter & Counting...'}
                 </>
               ) : (
                 <>
