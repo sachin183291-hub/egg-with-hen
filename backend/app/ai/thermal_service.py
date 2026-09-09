@@ -265,48 +265,99 @@ def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: 
 
 
 def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
-    temp_dir   = tempfile.gettempdir()
-    input_path = os.path.join(temp_dir, "input_thermal.mp4")
-    output_path = os.path.join(temp_dir, "output_thermal.mp4")
-    
+    temp_dir        = tempfile.gettempdir()
+    input_path      = os.path.join(temp_dir, "input_thermal.mp4")
+    output_path_mp4 = os.path.join(temp_dir, "output_thermal.mp4")
+    output_path_avi = os.path.join(temp_dir, "output_thermal.avi")
+
     with open(input_path, "wb") as f:
         f.write(video_bytes)
-    
+
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         raise ValueError("Could not open video file.")
-    
-    fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
+
+    fps    = max(cap.get(cv2.CAP_PROP_FPS), 1.0) or 25.0
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-    if not out.isOpened():
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-    
-    tracker = CentroidTracker(max_disappeared=15, max_distance=80)
-    
+
+    # Try codecs in order until one works
+    out = None
+    final_output = output_path_mp4
+    for codec_str, out_path in [('mp4v', output_path_mp4), ('MJPG', output_path_avi), ('DIVX', output_path_avi)]:
+        fourcc = cv2.VideoWriter_fourcc(*codec_str)
+        candidate = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
+        if candidate.isOpened():
+            out = candidate
+            final_output = out_path
+            break
+        candidate.release()
+
+    if out is None:
+        cap.release()
+        raise ValueError("Could not open VideoWriter with any available codec.")
+
+    tracker     = CentroidTracker(max_disappeared=15, max_distance=80)
+    frame_idx   = 0
+    YOLO_EVERY  = 5  # Run YOLO every N frames, track in between for speed
+
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        annotated_frame, current_total_count, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
+
+        if frame_idx % YOLO_EVERY == 0:
+            annotated_frame, _, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
+        else:
+            # Between YOLO frames: draw tracker centroids cheaply
+            annotated_frame = frame.copy()
+            for obj_id, centroid in tracker.objects.items():
+                cx, cy = int(centroid[0]), int(centroid[1])
+                cv2.circle(annotated_frame, (cx, cy), 20, (0, 200, 100), 2)
+                cv2.putText(annotated_frame, f"ID:{obj_id}", (cx - 20, cy - 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        # Overlay total count on every frame
+        total   = tracker.max_id_seen
+        s_scale = max(0.55, width * 0.001)
+        summary = f"Hens Detected: {total}"
+        (sw, _), _ = cv2.getTextSize(summary, cv2.FONT_HERSHEY_SIMPLEX, s_scale, 2)
+        cv2.rectangle(annotated_frame, (5, 5), (sw + 14, 34), (0, 0, 0), -1)
+        cv2.putText(annotated_frame, summary, (9, 28), cv2.FONT_HERSHEY_SIMPLEX, s_scale, (0, 255, 0), 2)
+
         out.write(annotated_frame)
-    
+        frame_idx += 1
+
     total_count = tracker.max_id_seen
-    
     cap.release()
     out.release()
+
     if os.path.exists(input_path):
-        os.remove(input_path)
-    
+        try:
+            os.remove(input_path)
+        except Exception:
+            pass
+
+    # If written as AVI, try to convert to MP4 using ffmpeg for browser playback
+    if final_output.endswith('.avi') and os.path.exists(final_output):
+        try:
+            import subprocess
+            converted = output_path_mp4
+            res = subprocess.run(
+                ["ffmpeg", "-y", "-i", final_output, "-vcodec", "libx264", "-crf", "28", converted],
+                capture_output=True, timeout=180
+            )
+            if res.returncode == 0 and os.path.exists(converted):
+                os.remove(final_output)
+                final_output = converted
+        except Exception as ffmpeg_err:
+            print(f"ffmpeg conversion skipped: {ffmpeg_err}")
+
     return {
         "success":    True,
         "is_video":   True,
         "hen_count":  total_count,
-        "video_path": output_path
+        "video_path": final_output
     }
 
 # Global variable to store latest stream results

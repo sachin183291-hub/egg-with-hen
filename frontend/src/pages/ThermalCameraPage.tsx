@@ -87,17 +87,21 @@ export default function ThermalCameraPage() {
         setResult(response.data)
       }
     } catch (err: any) {
-      if (err.response?.data instanceof Blob) {
-        const text = await err.response.data.text()
-        try {
+      let errorMessage = 'Failed to process thermal media.'
+      try {
+        if (err.response?.data instanceof Blob) {
+          const text = await err.response.data.text()
           const json = JSON.parse(text)
-          setError(json.detail || 'Failed to process thermal video.')
-        } catch {
-          setError('Failed to process thermal video.')
+          errorMessage = json.detail || text || errorMessage
+        } else if (err.response?.data?.detail) {
+          errorMessage = err.response.data.detail
+        } else if (err.message) {
+          errorMessage = err.message
         }
-      } else {
-        setError(err.response?.data?.detail || 'Failed to process thermal media.')
+      } catch {
+        // keep default errorMessage
       }
+      setError(`Error: ${errorMessage}`)
     } finally {
       setIsAnalyzing(false)
     }
