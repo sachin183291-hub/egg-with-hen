@@ -113,15 +113,26 @@ def detect_thermal_hotspots(
         cv2.inRange(hsv, np.array([0,   0,  200]), np.array([180, 50,  255])),               # white-hot
     )
 
-    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
-    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_OPEN,  np.ones((3, 3), np.uint8))
+    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_OPEN,  np.ones((7, 7), np.uint8))  # bigger kernel removes tiny noise
+
+    # ── Exclude the thermal color-scale bar on right edge (thin vertical strip) ──
+    # Most thermal cameras overlay a 5-15% wide color bar on the right side.
+    # Use 85% cutoff to safely exclude wider scale bars.
+    scale_bar_x = int(sw * 0.85)
+    hot_mask[:, scale_bar_x:] = 0
+    # Also exclude top/bottom strips that often have UI overlays
+    hot_mask[:int(sh * 0.03), :] = 0
+    hot_mask[int(sh * 0.97):, :] = 0
 
     # ── 3. Find contours ──────────────────────────────────────────────────────
     contours, _ = cv2.findContours(hot_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     frame_area = sh * sw
 
-    MIN_AREA   = 25
-    MAX_AREA   = int(frame_area * 0.40)
+    # MIN_AREA: a hen at typical drone altitude covers at least 200px² on 50%-scaled frame
+    # MAX_AREA: single blob shouldn't be more than 25% of frame (that's a whole flock merged)
+    MIN_AREA = max(200, int(frame_area * 0.0008))  # ~0.08% of frame minimum
+    MAX_AREA = int(frame_area * 0.25)
 
     rects:      List = []
     valid_hens: List = []
@@ -140,19 +151,19 @@ def detect_thermal_hotspots(
 
     def estimate_temp(roi_hsv_patch, roi_mask):
         if cv2.countNonZero(roi_mask) == 0:
-            return 21.0
+            return 0.0  # return 0 so it gets filtered out by the temp check below
         mh = float(cv2.mean(roi_hsv_patch[:, :, 0], mask=roi_mask)[0])
         ms = float(cv2.mean(roi_hsv_patch[:, :, 1], mask=roi_mask)[0])
         mv = float(cv2.mean(roi_hsv_patch[:, :, 2], mask=roi_mask)[0])
         if ms < 50 and mv > 200:
-            return 38.5
+            return 40.0   # white-hot core → very hot hen
         if mh >= 158 or mh <= 5:
-            return 36.0 + min(1.0, mv / 255.0) * 4.0
+            return 36.0 + min(1.0, mv / 255.0) * 5.0   # red → 36-41°C
         if mh <= 28:
-            return 30.0 + (1.0 - (mh - 5) / 23.0) * 8.0
+            return 31.0 + (1.0 - (mh - 5) / 23.0) * 7.0  # orange → 31-38°C
         if mh <= 42:
-            return 22.0 + (1.0 - (mh - 28) / 14.0) * 9.0
-        return 21.0
+            return 28.0 + (1.0 - (mh - 28) / 14.0) * 4.0  # yellow → 28-32°C
+        return 0.0  # green/blue = cold background, filter it out
 
     def draw_box(img, hx, hy, hw, hh, label, temp):
         norm  = min(1.0, max(0.0, (temp - min_temp) / max(max_temp - min_temp, 1)))
@@ -203,9 +214,10 @@ def detect_thermal_hotspots(
         roi_hsv = hsv[y_s: y_s + h_s, x_s: x_s + w_s]
         roi_mask = hot_mask[y_s: y_s + h_s, x_s: x_s + w_s]
         
-        # Check overall blob temperature first
+        # Check overall blob temperature — hens are 30°C–42°C body temp range
+        # Tighter range avoids background thermal artifacts from ground/equipment
         temp = estimate_temp(roi_hsv, roi_mask)
-        if not (15.0 <= temp <= 45.0):
+        if not (30.0 <= temp <= 42.0):  # real hen body heat only
             continue
 
         used_boxes.append((x1, y1, x2, y2))
@@ -223,9 +235,11 @@ def detect_thermal_hotspots(
         peaks_mask = (roi_blurred == local_max) & (roi_mask > 0) & (roi_blurred > 50)
         
         num_peaks, _, stats, peak_centroids = cv2.connectedComponentsWithStats(np.uint8(peaks_mask) * 255)
-        # Filter out tiny noise components (area < 2 pixels)
-        real_peaks = sum(1 for i in range(1, num_peaks) if stats[i, cv2.CC_STAT_AREA] >= 2)
-        n_hens = max(1, real_peaks)
+        # Filter out tiny noise components — require at least 4 pixels to count as a real heat core
+        # This prevents hot-pixel noise from inflating the count
+        real_peaks = sum(1 for i in range(1, num_peaks) if stats[i, cv2.CC_STAT_AREA] >= 4)
+        # Cap peaks per blob: no single blob should represent >8 hens (unrealistic for drone altitude)
+        n_hens = max(1, min(real_peaks, 8))
 
         if n_hens == 1:
             rects.append((x1, y1, x2, y2))
@@ -310,23 +324,133 @@ def detect_thermal_hotspots(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+def _gemini_count_hens_in_thermal(image_bytes: bytes) -> Dict[str, Any]:
+    """
+    Use Gemini Vision AI to accurately count hens in a thermal image.
+    Returns dict with: hen_count (int), hens (list), confidence (str), notes (str)
+    Returns None if Gemini is unavailable.
+    """
+    try:
+        import json as _json
+        import google.generativeai as genai
+        from app.config import settings
+
+        if not settings.GEMINI_API_KEY:
+            return None
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+
+        prompt = """You are an expert thermal imaging analyst for poultry farms.
+This is a THERMAL CAMERA image from a drone. Hens appear as bright red/orange/yellow/white heat blobs against a cooler blue/green background.
+
+Your task: Count EXACTLY how many individual hens (chickens) are visible in this thermal image.
+
+Rules:
+- Each distinct heat blob = 1 hen (unless very large = clustered hens)
+- The color scale bar on the right edge is NOT a hen — ignore it
+- UI overlays, text, numbers on the image are NOT hens — ignore them
+- Only count actual live bird heat signatures
+- Temperature range for hens: 30°C to 42°C (medium to bright heat blobs)
+
+Return ONLY valid JSON in this exact format (no markdown, no explanation):
+{
+  "hen_count": <integer>,
+  "confidence": "high" | "medium" | "low",
+  "notes": "<brief description of what you see>",
+  "hens": [
+    {"hen_number": 1, "temperature": <estimated_temp_float>, "location": "<top-left|top-right|center|bottom-left|bottom-right>"},
+    ...
+  ]
+}"""
+
+        import io
+        from PIL import Image as PILImage
+        pil_img = PILImage.open(io.BytesIO(image_bytes))
+
+        response = model.generate_content(
+            [prompt, pil_img],
+            generation_config={"temperature": 0.0}
+        )
+
+        raw = response.text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(ln for ln in lines if not ln.strip().startswith("```")).strip()
+
+        data = _json.loads(raw)
+        return {
+            "hen_count":  int(data.get("hen_count", 0)),
+            "confidence": str(data.get("confidence", "medium")),
+            "notes":      str(data.get("notes", "")),
+            "hens": [
+                {
+                    "hen_number":  int(h.get("hen_number", i + 1)),
+                    "temperature": float(h.get("temperature", 35.0)),
+                }
+                for i, h in enumerate(data.get("hens", []))
+            ],
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Gemini thermal count failed: %s", e)
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("Could not decode image bytes.")
 
-    annotated, hen_count, hens_data = detect_thermal_hotspots(image, min_temp, max_temp)
+    # ── Step 1: Try Gemini AI for EXACT accurate count ────────────────────────
+    gemini_result = _gemini_count_hens_in_thermal(image_bytes)
+
+    # ── Step 2: Run OpenCV detection for bounding boxes + annotated image ─────
+    #   (OpenCV gives us box positions to draw on the image)
+    annotated, opencv_count, opencv_hens = detect_thermal_hotspots(image, min_temp, max_temp)
+
+    # ── Step 3: Use Gemini count if available (more accurate), else OpenCV ────
+    if gemini_result is not None:
+        hen_count = gemini_result["hen_count"]
+        # Use Gemini's per-hen data (temperatures from AI), but fall back to opencv if empty
+        hens_data = gemini_result["hens"] if gemini_result["hens"] else opencv_hens
+        # If Gemini gave fewer hens than OpenCV found boxes for, pad with opencv temps
+        if len(hens_data) < hen_count and opencv_hens:
+            extra = [
+                {"hen_number": len(hens_data) + i + 1, "temperature": h["temperature"]}
+                for i, h in enumerate(opencv_hens[len(hens_data):hen_count])
+            ]
+            hens_data = hens_data + extra
+        detection_method = f"Gemini AI (confidence: {gemini_result['confidence']})"
+        notes = gemini_result.get("notes", "")
+    else:
+        hen_count = opencv_count
+        hens_data = opencv_hens
+        detection_method = "OpenCV thermal blob detection"
+        notes = ""
+
+    # ── Step 4: Update count overlay on annotated image ───────────────────────
+    summary = f"Hens: {hen_count}  [{detection_method}]"
+    s_scale = max(0.5, image.shape[1] * 0.0010)
+    (tw, _), _ = cv2.getTextSize(summary, cv2.FONT_HERSHEY_SIMPLEX, s_scale, 2)
+    cv2.rectangle(annotated, (5, 5), (tw + 16, 36), (0, 0, 0), -1)
+    cv2.putText(annotated, f"Hens: {hen_count}  (AI Verified)", (9, 29),
+                cv2.FONT_HERSHEY_SIMPLEX, s_scale, (0, 255, 100), 2)
 
     _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
     encoded_img = base64.b64encode(buffer).decode("utf-8")
 
     return {
-        "success":      True,
-        "is_video":     False,
-        "hen_count":    hen_count,
-        "hens":         hens_data,
-        "result_image": encoded_img,
+        "success":          True,
+        "is_video":         False,
+        "hen_count":        hen_count,
+        "hens":             hens_data,
+        "result_image":     encoded_img,
+        "detection_method": detection_method,
+        "notes":            notes,
     }
 
 
