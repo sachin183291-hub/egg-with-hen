@@ -88,6 +88,7 @@ def detect_thermal_hotspots(
     min_temp: float = 20.0,
     max_temp: float = 40.0,
     tracker: CentroidTracker = None,
+) -> Tuple[np.ndarray, int, List[Dict]]:
     h_img, w_img = image.shape[:2]
     annotated = image.copy()
 
