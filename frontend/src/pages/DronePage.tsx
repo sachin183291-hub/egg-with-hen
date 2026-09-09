@@ -4,7 +4,8 @@ import { Plane, Battery, Wifi, Save, Activity, Signal, ArrowUp, Wind, Camera, Ma
 export default function DronePage() {
   const [batteryLevel, setBatteryLevel] = useState(85)
   const [ipAddress, setIpAddress] = useState('192.168.1.100')
-  const [savedIp, setSavedIp] = useState('192.168.1.100')
+  const [savedIp, setSavedIp] = useState('')
+  const API_URL = import.meta.env.VITE_API_URL || ''
   const [isSaving, setIsSaving] = useState(false)
   
   // Drone status metrics
@@ -83,11 +84,21 @@ export default function DronePage() {
               </div>
             </div>
 
-            <img 
-              src="https://images.unsplash.com/photo-1508614589041-895b88991e3e?q=80&w=2000&auto=format&fit=crop" 
-              alt="Drone View" 
-              style={{ width: '100%', height: '450px', objectFit: 'cover', filter: 'contrast(1.1) saturate(1.2)' }} 
-            />
+            {savedIp ? (
+              <img 
+                src={`${API_URL}/api/ai/drone-stream?ip=${encodeURIComponent(savedIp)}`} 
+                alt="Drone Live Stream" 
+                style={{ width: '100%', height: '450px', objectFit: 'cover' }} 
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = "https://images.unsplash.com/photo-1508614589041-895b88991e3e?q=80&w=2000&auto=format&fit=crop";
+                }}
+              />
+            ) : (
+              <div style={{ width: '100%', height: '450px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: 'var(--text-muted)' }}>
+                Please Bind IP to Start Live Stream
+              </div>
+            )}
             
             <div style={{ position: 'absolute', bottom: '0', left: '0', right: '0', background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)', padding: '40px 20px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', color: 'white' }}>
               <div>

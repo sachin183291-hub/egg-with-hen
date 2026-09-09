@@ -551,3 +551,21 @@ async def thermal_analyze(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error processing thermal media: {str(exc)}")
+
+@router.get("/drone-stream")
+async def drone_stream(ip: str):
+    """Serve live MJPEG stream from drone IP using thermal analysis."""
+    from fastapi.responses import StreamingResponse
+    from app.ai.thermal_service import generate_thermal_stream
+    
+    # Optional: Basic validation of the IP or URL format
+    if not ip.startswith("http") and not ip.startswith("rtsp") and not ip.startswith("udp"):
+        # Assume it's a raw IP and format as an http stream if protocol is missing
+        stream_url = f"http://{ip}:8080/video"
+    else:
+        stream_url = ip
+        
+    return StreamingResponse(
+        generate_thermal_stream(stream_url),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )

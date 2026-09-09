@@ -340,3 +340,43 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         "hen_count":  total_count,
         "video_path": output_path
     }
+
+async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: float = 40.0):
+    import asyncio
+    cap = cv2.VideoCapture(url)
+    if not cap.isOpened():
+        # Fallback for testing: yield a placeholder image
+        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(placeholder, "Connecting to drone stream...", (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+        _, buffer = cv2.imencode('.jpg', placeholder)
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        
+        # Try to open again if it was just slow
+        await asyncio.sleep(2)
+        cap = cv2.VideoCapture(url)
+        if not cap.isOpened():
+            return
+            
+    tracker = CentroidTracker(max_disappeared=15, max_distance=80)
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            await asyncio.sleep(0.1)
+            continue
+            
+        annotated_frame, _, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
+        
+        # Encode frame to JPEG
+        ret, buffer = cv2.imencode('.jpg', annotated_frame)
+        if not ret:
+            continue
+            
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        
+        # Yield control to the event loop so we don't block other requests
+        await asyncio.sleep(0.01)
+
