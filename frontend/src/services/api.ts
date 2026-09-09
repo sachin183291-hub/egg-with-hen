@@ -111,7 +111,7 @@ export const aiApi = {
   chatAnalyze: (formData: FormData) => api.post('/api/ai/chat-analyze', formData),
   /** Thermal Analyze: POST /api/ai/thermal-analyze (image) */
   thermalAnalyze: (formData: FormData) =>
-    api.post('/api/ai/thermal-analyze', formData, { timeout: 60000 }),  // 60s for image
+    api.post('/api/ai/thermal-analyze', formData, { timeout: 120000 }),  // 120s for image
   /** Thermal Analyze Video: POST /api/ai/thermal-analyze (video) — long timeout */
   thermalAnalyzeVideo: (formData: FormData) =>
     api.post('/api/ai/thermal-analyze', formData, {

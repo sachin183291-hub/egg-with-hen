@@ -270,9 +270,9 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         cap.release()
         raise ValueError("Could not open VideoWriter with any available codec.")
 
-    tracker    = CentroidTracker(max_disappeared=15, max_distance=80)
+    tracker    = CentroidTracker(max_disappeared=5, max_distance=80)
     frame_idx  = 0
-    SKIP       = 3   # process every 3rd frame (fast + accurate enough)
+    SKIP       = 15   # process every 15th frame (fast enough to avoid timeouts)
 
     while True:
         ret, frame = cap.read()
@@ -379,7 +379,7 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                 out = cv2.VideoWriter(out_video_path, fourcc, fps, (w, h))
 
-            if frame_idx % 3 == 0:
+            if frame_idx % 15 == 0:
                 annotated, _, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
             else:
                 annotated = frame.copy()
