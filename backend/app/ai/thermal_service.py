@@ -378,21 +378,6 @@ Return ONLY valid JSON in this exact format (no markdown, no explanation):
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(ln for ln in lines if not ln.strip().startswith("```")).strip()
-
-        data = _json.loads(raw)
-        return {
-            "hen_count":  int(data.get("hen_count", 0)),
-            "confidence": str(data.get("confidence", "medium")),
-            "notes":      str(data.get("notes", "")),
-            "hens": [
-                {
-                    "hen_number":  int(h.get("hen_number", i + 1)),
-                    "temperature": float(h.get("temperature", 35.0)),
-                }
-                for i, h in enumerate(data.get("hens", []))
-            ],
-        }
-    except Exception as e:
         import logging
         logging.getLogger(__name__).warning("Gemini thermal count failed: %s", e)
         return None
@@ -405,39 +390,46 @@ def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: 
     if image is None:
         raise ValueError("Could not decode image bytes.")
 
-    # ── Step 1: Try Gemini AI for EXACT accurate count ────────────────────────
-    gemini_result = _gemini_count_hens_in_thermal(image_bytes)
-
-    # ── Step 2: Run OpenCV detection for bounding boxes + annotated image ─────
-    #   (OpenCV gives us box positions to draw on the image)
+    # ── Step 1: Run OpenCV detection for bounding boxes + annotated image ─────
     annotated, opencv_count, opencv_hens = detect_thermal_hotspots(image, min_temp, max_temp)
 
-    # ── Step 3: Use Gemini count if available (more accurate), else OpenCV ────
-    if gemini_result is not None:
-        hen_count = gemini_result["hen_count"]
-        # Use Gemini's per-hen data (temperatures from AI), but fall back to opencv if empty
-        hens_data = gemini_result["hens"] if gemini_result["hens"] else opencv_hens
-        # If Gemini gave fewer hens than OpenCV found boxes for, pad with opencv temps
-        if len(hens_data) < hen_count and opencv_hens:
-            extra = [
-                {"hen_number": len(hens_data) + i + 1, "temperature": h["temperature"]}
-                for i, h in enumerate(opencv_hens[len(hens_data):hen_count])
-            ]
-            hens_data = hens_data + extra
-        detection_method = f"Gemini AI (confidence: {gemini_result['confidence']})"
-        notes = gemini_result.get("notes", "")
-    else:
-        hen_count = opencv_count
-        hens_data = opencv_hens
-        detection_method = "OpenCV thermal blob detection"
-        notes = ""
+    # ── Step 1.5: If OpenCV found no thermal heat blobs, fallback to YOLO ─────
+    yolo_used = False
+    if opencv_count == 0:
+        try:
+            from app.ai.yolo_service import detect_objects_image
+            yolo_res = detect_objects_image(image, conf_threshold=0.25)
+            if yolo_res.get("hen_count", 0) > 0:
+                yolo_used = True
+                annotated = yolo_res["annotated_frame"]
+                opencv_count = yolo_res["hen_count"]
+                opencv_hens = []
+                for det in yolo_res.get("detections", []):
+                    if det["class"] == "hen":
+                        x1, y1, x2, y2 = det["bbox"]
+                        opencv_hens.append({
+                            "hen_number": det["id"],
+                            "temperature": 35.0, # Default temp for normal image
+                            "width_px": int(x2 - x1),
+                            "height_px": int(y2 - y1),
+                            "w": int(x2 - x1),
+                            "h": int(y2 - y1)
+                        })
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("YOLO fallback failed: %s", e)
 
-    # ── Step 4: Update count overlay on annotated image ───────────────────────
+    hen_count = opencv_count
+    hens_data = opencv_hens
+    detection_method = "YOLO AI detection" if yolo_used else "OpenCV thermal blob detection"
+    notes = ""
+
+    # ── Step 2: Update count overlay on annotated image ───────────────────────
     summary = f"Hens: {hen_count}  [{detection_method}]"
     s_scale = max(0.5, image.shape[1] * 0.0010)
     (tw, _), _ = cv2.getTextSize(summary, cv2.FONT_HERSHEY_SIMPLEX, s_scale, 2)
     cv2.rectangle(annotated, (5, 5), (tw + 16, 36), (0, 0, 0), -1)
-    cv2.putText(annotated, f"Hens: {hen_count}  (AI Verified)", (9, 29),
+    cv2.putText(annotated, f"Hens: {hen_count}", (9, 29),
                 cv2.FONT_HERSHEY_SIMPLEX, s_scale, (0, 255, 100), 2)
 
     _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 92])
