@@ -138,12 +138,12 @@ def detect_thermal_hotspots(
                 return True
         return False
 
-    def estimate_temp(roi_hsv_patch):
-        if roi_hsv_patch.size == 0:
+    def estimate_temp(roi_hsv_patch, roi_mask):
+        if cv2.countNonZero(roi_mask) == 0:
             return 21.0
-        mh = float(cv2.mean(roi_hsv_patch[:, :, 0])[0])
-        ms = float(cv2.mean(roi_hsv_patch[:, :, 1])[0])
-        mv = float(cv2.mean(roi_hsv_patch[:, :, 2])[0])
+        mh = float(cv2.mean(roi_hsv_patch[:, :, 0], mask=roi_mask)[0])
+        ms = float(cv2.mean(roi_hsv_patch[:, :, 1], mask=roi_mask)[0])
+        mv = float(cv2.mean(roi_hsv_patch[:, :, 2], mask=roi_mask)[0])
         if ms < 50 and mv > 200:
             return 38.5
         if mh >= 158 or mh <= 5:
@@ -176,11 +176,13 @@ def detect_thermal_hotspots(
 
     SINGLE_HEN = max(80, int(frame_area * 0.005)) # Default fallback
     if valid_areas:
-        max_a = max(valid_areas)
-        # Filter out tiny noise (less than 10% of the biggest hen) to find true median
-        robust_areas = [a for a in valid_areas if a > max(MIN_AREA, max_a * 0.1)]
-        if robust_areas:
-            SINGLE_HEN = max(MIN_AREA, float(np.median(robust_areas)))
+        valid_areas.sort()
+        start_idx = int(len(valid_areas) * 0.2)
+        end_idx = int(len(valid_areas) * 0.9)
+        if start_idx < end_idx:
+            SINGLE_HEN = max(MIN_AREA, float(np.median(valid_areas[start_idx:end_idx])))
+        else:
+            SINGLE_HEN = max(MIN_AREA, float(np.median(valid_areas)))
 
     for cnt in sorted(contours, key=cv2.contourArea, reverse=True):
         area = cv2.contourArea(cnt)
@@ -201,7 +203,8 @@ def detect_thermal_hotspots(
         # Intelligent adaptive counting based on median size
         n_hens = max(1, round(area / SINGLE_HEN))
         roi_hsv = hsv[y_s: y_s + h_s, x_s: x_s + w_s]
-        temp = estimate_temp(roi_hsv)
+        roi_mask = hot_mask[y_s: y_s + h_s, x_s: x_s + w_s]
+        temp = estimate_temp(roi_hsv, roi_mask)
         
         if not (15.0 <= temp <= 45.0):
             continue
