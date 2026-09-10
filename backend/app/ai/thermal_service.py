@@ -612,7 +612,7 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    # Downscale to 640px for speed
+    # Downscale to 640px max width for speed
     MAX_WIDTH = 640
     scale = 1.0
     if width > MAX_WIDTH:
@@ -620,12 +620,8 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Skip frames — process at max 5 FPS
-    frame_skip = max(1, int(fps / 5))
-
-    # Pre-compute zone
-    zone_top    = int(height * 0.3)
-    zone_bottom = int(height * 0.7)
+    # Process at max 10 FPS — smooth enough, fast enough
+    frame_skip = max(1, int(fps / 10))
 
     model = get_tracking_model()
     unique_hen_ids: set = set()
@@ -644,38 +640,34 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
+            # Low confidence (0.15) — hens in cages are partially occluded
             results = model.track(frame, persist=True, tracker="botsort.yaml",
-                                  verbose=False, imgsz=320)
+                                  verbose=False, imgsz=416, conf=0.15)
             annotated = results[0].plot() if len(results) > 0 else frame.copy()
-
-            # Draw counting zone
-            cv2.line(annotated, (0, zone_top),    (width, zone_top),    (255, 0, 0), 2)
-            cv2.line(annotated, (0, zone_bottom),  (width, zone_bottom),  (255, 0, 0), 2)
 
             current_visible = 0
             if len(results) > 0 and results[0].boxes is not None:
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0].item())
                     raw_name = results[0].names.get(cls_id, "unknown").lower()
-                    if "hen" not in raw_name and "bird" not in raw_name:
+                    # Accept bird, hen, chicken, or animal detections
+                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal")):
                         continue
                     if box.id is not None:
                         tid = int(box.id[0].item())
                         current_visible += 1
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-                        cy = (y1 + y2) / 2
-                        if zone_top <= cy <= zone_bottom:
-                            unique_hen_ids.add(tid)
+                        unique_hen_ids.add(tid)  # Count ALL detected hens (no zone restriction)
 
             total_unique = len(unique_hen_ids)
 
-            # Count overlay
-            cv2.rectangle(annotated, (5, 5), (440, 38), (0, 0, 0), -1)
-            cv2.putText(annotated,
-                        f"Total Unique Hens: {total_unique}  |  Visible: {current_visible}",
-                        (9, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # Count overlay — green text on black background
+            label = f"Hens: {total_unique} unique  |  Visible now: {current_visible}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            cv2.rectangle(annotated, (5, 5), (tw + 16, th + 16), (0, 0, 0), -1)
+            cv2.putText(annotated, label, (9, th + 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
 
     finally:
