@@ -15,6 +15,7 @@ export default function ThermalCameraPage() {
   const [videoStreamUrl, setVideoStreamUrl] = useState<string | null>(null)
   const [videoJobId, setVideoJobId] = useState<string | null>(null)
   const [processingProgress, setProcessingProgress] = useState(0)
+  const [mjpegStreamUrl, setMjpegStreamUrl] = useState<string | null>(null)
 
   // Live Stream State
   const [activeTab, setActiveTab] = useState<'upload' | 'live'>('upload')
@@ -78,7 +79,7 @@ export default function ThermalCameraPage() {
     }
   }
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       const isVid = file.type.includes('video') || file.name.match(/\.(mp4|avi|mov|webm)$/i) !== null
@@ -87,7 +88,29 @@ export default function ThermalCameraPage() {
       setPreviewUrl(URL.createObjectURL(file))
       setResult(null)
       setProcessedVideoUrl(null)
+      setVideoStreamUrl(null)
+      setVideoJobId(null)
+      setMjpegStreamUrl(null)
       setError(null)
+      
+      if (isVid) {
+         // Automatically start the instant MJPEG stream for videos
+         setIsAnalyzing(true)
+         const formData = new FormData()
+         formData.append('file', file)
+         try {
+             const res = await fetch(`${API_URL}/api/ai/upload-temp-video`, { method: 'POST', body: formData })
+             const data = await res.json()
+             if (data.path) {
+                 setMjpegStreamUrl(`${API_URL}/api/ai/stream-uploaded-video?path=${encodeURIComponent(data.path)}`)
+                 setResult({ is_video: true, hen_count: "Counting..." }) // Fake result to hide the "Analyze" button
+             }
+         } catch(e) {
+             setError("Failed to start automatic video stream.")
+         } finally {
+             setIsAnalyzing(false)
+         }
+      }
     }
   }
 
@@ -144,6 +167,7 @@ export default function ThermalCameraPage() {
     setProcessedVideoUrl(null)
     setVideoStreamUrl(null)
     setVideoJobId(null)
+    setMjpegStreamUrl(null)
     setProcessingProgress(0)
     setError(null)
     setIsAnalyzing(false)
@@ -254,7 +278,9 @@ export default function ThermalCameraPage() {
 
           {activeTab === 'upload' && previewUrl && (
             <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: videoStreamUrl ? '2px solid #ef4444' : '1px solid var(--border)' }}>
-              {isVideo ? (
+              {mjpegStreamUrl ? (
+                <img src={mjpegStreamUrl} alt="Live processing stream" style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
+              ) : isVideo ? (
                 <video
                   src={previewUrl}
                   controls
@@ -336,7 +362,13 @@ export default function ThermalCameraPage() {
             </div>
           )}
 
-          {isAnalyzing && (
+          {mjpegStreamUrl ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <Activity size={48} color="#ef4444" style={{ margin: '0 auto' }} />
+              <h3 style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>Counting automatically in real-time...</h3>
+              <p style={{ color: 'var(--text-muted)' }}>See the video view on the left for the live count.</p>
+            </div>
+          ) : isAnalyzing ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', gap: 16 }}>
               <div className="pulse-ring" style={{ width: '80px', height: '80px', background: '#ef4444', borderRadius: '50%', animation: 'pulse-red 1.5s infinite' }}></div>
               <p style={{ fontSize: '1.1rem', color: '#ef4444', fontWeight: '500' }}>

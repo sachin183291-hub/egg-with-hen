@@ -807,3 +807,94 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
 
     jobs_dict[job_id]["progress"] = 100
     return {"success": True, "hen_count": total_unique, "video_path": out_path}
+
+async def generate_uploaded_video_stream(input_path: str):
+    """
+    Generator that serves an uploaded video as a perfectly smooth MJPEG stream in real-time.
+    Uses smart frame skipping to run YOLOWorld AI at 3 FPS while yielding frames at 25 FPS.
+    """
+    import asyncio
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        return
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Downscale for performance
+    MAX_W = 640
+    scale = 1.0
+    if width > MAX_W:
+        scale = MAX_W / width
+        width = int(width * scale)
+        height = int(height * scale)
+
+    TARGET_AI_FPS = 3
+    frame_skip = max(1, int(fps / TARGET_AI_FPS))
+
+    tracking_model = get_tracking_model()
+    
+    unique_ids: set = set()
+    max_visible = 0
+    frame_idx = 0
+    last_boxes_data = []
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                # Loop video or end
+                break
+                
+            frame_idx += 1
+            if scale != 1.0:
+                frame = cv2.resize(frame, (width, height))
+
+            if frame_idx % frame_skip == 0 or frame_idx == 1:
+                results = tracking_model.track(frame, persist=True, tracker="bytetrack.yaml",
+                                               verbose=False, imgsz=416, conf=0.10)
+                last_boxes_data = []
+                current_visible = 0
+                
+                if results and results[0].boxes is not None:
+                    for box in results[0].boxes:
+                        cls_id   = int(box.cls[0].item())
+                        raw_name = results[0].names.get(cls_id, "").lower()
+                        if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                            continue
+                        
+                        current_visible += 1
+                        if box.id is not None:
+                            unique_ids.add(int(box.id[0].item()))
+                            
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        conf = float(box.conf[0].item())
+                        last_boxes_data.append((int(x1), int(y1), int(x2), int(y2), conf))
+                
+                if current_visible > max_visible:
+                    max_visible = current_visible
+
+            annotated = frame.copy()
+            for x1, y1, x2, y2, conf in last_boxes_data:
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated, f"Hen", (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+            total_unique = max(len(unique_ids), max_visible)
+            label = f"Hens: {total_unique}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
+            cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+            
+            # Sleep exactly the duration of one frame to enforce true real-time playback speed
+            await asyncio.sleep(1.0 / fps)
+
+    finally:
+        cap.release()
+        try:
+            os.remove(input_path)
+        except Exception:
+            pass

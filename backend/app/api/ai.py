@@ -631,3 +631,32 @@ async def get_latest_drone_video():
         media_type="video/mp4",
         filename="drone_thermal_recording.mp4"
     )
+
+@router.post("/upload-temp-video")
+async def upload_temp_video(file: UploadFile = File(...)):
+    """Saves uploaded video temporarily for immediate MJPEG streaming."""
+    import tempfile
+    
+    image_bytes = await file.read()
+    tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", prefix="stream_upload_")
+    tmp_in.write(image_bytes)
+    tmp_in.flush()
+    tmp_in.close()
+    
+    return {"path": tmp_in.name}
+
+@router.get("/stream-uploaded-video")
+async def stream_uploaded_video(path: str):
+    """Serve live MJPEG stream from an uploaded video file with perfectly smooth playback."""
+    from fastapi.responses import StreamingResponse
+    from app.ai.thermal_service import generate_uploaded_video_stream
+    import os
+    
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+        
+    return StreamingResponse(
+        generate_uploaded_video_stream(path),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
