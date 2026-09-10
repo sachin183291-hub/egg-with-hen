@@ -541,7 +541,10 @@ async def thermal_analyze(
             from app.ai.thermal_service import process_video_job
 
             # Save uploaded bytes to temp file
-            tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", prefix="upload_")
+            ext = os.path.splitext(image.filename)[1] if image.filename else ".mp4"
+            if not ext:
+                ext = ".mp4"
+            tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=ext, prefix="upload_")
             tmp_in.write(image_bytes)
             tmp_in.flush()
             tmp_in.close()
@@ -638,7 +641,11 @@ async def upload_temp_video(file: UploadFile = File(...)):
     import tempfile
     
     image_bytes = await file.read()
-    tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", prefix="stream_upload_")
+    import os
+    ext = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
+    if not ext:
+        ext = ".mp4"
+    tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=ext, prefix="stream_upload_")
     tmp_in.write(image_bytes)
     tmp_in.flush()
     tmp_in.close()
