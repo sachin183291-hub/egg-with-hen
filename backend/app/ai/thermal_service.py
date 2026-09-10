@@ -925,7 +925,7 @@ async def generate_uploaded_video_stream(input_path: str):
                 
             try:
                 # Run AI (predict bypasses ByteTrack filters)
-                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.10)
+                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.01)
                 rects = []
                 new_boxes_data = []
                 
