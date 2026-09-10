@@ -34,18 +34,6 @@ def get_tracking_model():
             print("[Tracking] Loaded yolov8n — COCO class 14 (bird) covers hens")
     return _tracking_model
 
-_fast_model = None
-
-def get_fast_model():
-    """Returns a globally cached yolov8n model for extreme speed video processing."""
-    global _fast_model
-    if _fast_model is None:
-        from ultralytics import YOLO
-        _fast_model = YOLO("yolov8n.pt")
-        print("[Tracking] Loaded ultra-fast yolov8n model globally for background jobs.")
-    return _fast_model
-
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Core detection — fast OpenCV-based thermal blob detection (NO YOLO needed)
@@ -738,7 +726,8 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
     out      = cv2.VideoWriter(out_path, fourcc, OUT_FPS, (width, height))
 
-    fast_model = get_fast_model()
+    # Use the highly accurate YOLOWorld model (cached)
+    tracking_model = get_tracking_model()
 
     unique_ids: set = set()
     max_visible = 0
@@ -758,9 +747,9 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # Use 416px for better accuracy (256px is too small for hens in cages)
-            results = fast_model.track(frame, persist=True, tracker="botsort.yaml",
-                                       verbose=False, imgsz=416, conf=0.15)
+            # Use 416px for better accuracy
+            results = tracking_model.track(frame, persist=True, tracker="botsort.yaml",
+                                           verbose=False, imgsz=416, conf=0.15)
             annotated = results[0].plot() if results else frame.copy()
 
             current_visible = 0
