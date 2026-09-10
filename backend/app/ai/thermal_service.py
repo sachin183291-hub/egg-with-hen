@@ -739,11 +739,8 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
 
             # Run AI only every N frames
             if frame_idx % frame_skip == 0 or frame_idx == 1:
-                # bytetrack.yaml is massively faster than botsort.yaml on CPU
-                # conf=0.10 to help detect white hens that blend in
-                # Run tracker
-                results = tracking_model.track(frame, persist=True, tracker="bytetrack.yaml",
-                                               verbose=False, imgsz=416, conf=0.05)
+                # Run detector (predict bypasses ByteTrack confidence filters)
+                results = tracking_model.predict(frame, verbose=False, imgsz=416, conf=0.01)
                 
                 last_boxes_data = []
                 current_visible = 0
@@ -758,9 +755,6 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                             continue
                         
                         current_visible += 1
-                        if box.id is not None:
-                            unique_ids.add(int(box.id[0].item()))
-                            
                         # Save box for drawing on intermediate frames
                         conf = float(box.conf[0].item())
                         last_boxes_data.append((int(x1), int(y1), int(x2), int(y2), conf))
@@ -870,9 +864,8 @@ async def generate_uploaded_video_stream(input_path: str):
                 continue
                 
             try:
-                # Run AI (this takes time, but won't block the video stream)
-                results = tracking_model.track(frame_for_ai, persist=True, tracker="bytetrack.yaml",
-                                               verbose=False, imgsz=416, conf=0.05)
+                # Run AI (predict bypasses ByteTrack filters)
+                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.01)
                 new_boxes = []
                 current_vis = 0
                 
@@ -886,9 +879,6 @@ async def generate_uploaded_video_stream(input_path: str):
                             continue
                         
                         current_vis += 1
-                        if box.id is not None:
-                            unique_ids.add(int(box.id[0].item()))
-                            
                         conf = float(box.conf[0].item())
                         new_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
                 
