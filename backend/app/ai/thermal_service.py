@@ -436,8 +436,8 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
     fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
     # ── CPU SPEED OPTIMIZATION 1: DOWNSCALE ─────────────────────────────────
-    # Massive videos (4K) crash or timeout CPUs. Scale down to 800px max width.
-    MAX_WIDTH = 800
+    # Massive videos crash or timeout CPUs. Scale down to 640px max width.
+    MAX_WIDTH = 640
     scale = 1.0
     if width > MAX_WIDTH:
         scale = MAX_WIDTH / width
@@ -445,8 +445,8 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         height = int(height * scale)
 
     # ── CPU SPEED OPTIMIZATION 2: SKIP FRAMES ───────────────────────────────
-    # Track at max 15 FPS to prevent 10-minute timeouts. BoT-SORT can handle it.
-    frame_skip = max(1, int(fps / 15))
+    # Track at max 5 FPS to prevent 10-minute timeouts. BoT-SORT can handle it.
+    frame_skip = max(1, int(fps / 5))
     out_fps = fps / frame_skip
 
     out: cv2.VideoWriter | None = None
@@ -482,7 +482,8 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
             frame = cv2.resize(frame, (width, height))
 
         # Run tracking using BoT-SORT + Re-ID (built into Ultralytics YOLO)
-        results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False)
+        # SPEED OPTIMIZATION 3: Pass imgsz=320 to dramatically speed up CPU inference
+        results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False, imgsz=320)
         annotated_frame = results[0].plot() if len(results) > 0 else frame.copy()
 
         # Define virtual counting zone (middle 40% of the screen)
