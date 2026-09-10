@@ -14,14 +14,16 @@ def get_tracking_model():
     global _tracking_model
     if _tracking_model is None:
         try:
-            # Attempt to use the requested YOLO11 segmentation model
-            _tracking_model = YOLO("yolo11n-seg.pt")
+            # Prioritize existing custom model trained for hens
+            _tracking_model, _ = load_model()
+            if _tracking_model is None:
+                raise ValueError("Custom model not found")
         except Exception:
             try:
-                _tracking_model = YOLO("yolov8n-seg.pt")
+                # Fallback to requested YOLO11 or YOLOv8 standard model
+                _tracking_model = YOLO("yolo11n-seg.pt")
             except Exception:
-                # Fallback to existing custom model or YOLOv8n
-                _tracking_model, _ = load_model()
+                _tracking_model = YOLO("yolov8n-seg.pt")
     return _tracking_model
 
     def __init__(self, max_disappeared=10, max_distance=60):
@@ -465,8 +467,13 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         current_visible = 0
         if len(results) > 0 and results[0].boxes is not None:
             for box in results[0].boxes:
-                # If using standard YOLO, class 14 or 16 might be bird/dog.
-                # If custom model, 'hen' class is used.
+                cls_id = int(box.cls[0].item())
+                raw_class_name = results[0].names.get(cls_id, "unknown").lower()
+                
+                # Only count 'hen' class (or if standard YOLO, class 14 is bird, but custom model has 'hen')
+                if "hen" not in raw_class_name and "bird" not in raw_class_name:
+                    continue
+
                 if box.id is not None:
                     track_id = int(box.id[0].item())
                     unique_hen_ids.add(track_id)
@@ -570,6 +577,12 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
             current_visible = 0
             if len(results) > 0 and results[0].boxes is not None:
                 for box in results[0].boxes:
+                    cls_id = int(box.cls[0].item())
+                    raw_class_name = results[0].names.get(cls_id, "unknown").lower()
+                    
+                    if "hen" not in raw_class_name and "bird" not in raw_class_name:
+                        continue
+
                     if box.id is not None:
                         track_id = int(box.id[0].item())
                         unique_hen_ids.add(track_id)
