@@ -693,11 +693,11 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
 def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                       min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     """
-    Ultra-fast background video processing:
-    - Runs AI on only 3 frames per second (huge CPU saving)
-    - Uses imgsz=256 for fastest inference
-    - Writes output at 10 FPS (only AI-processed frames, no redundant copies)
-    - Updates progress for frontend progress bar
+    Extreme-fast background video processing (Under 2 mins):
+    - cap.grab() to skip decoding ignored frames
+    - 2 FPS AI processing target
+    - ByteTrack instead of BoT-SORT (removes heavy CPU ReID model)
+    - 320px max width for fast video encoding
     """
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -708,25 +708,24 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    # Aggressive downscale — 480px is plenty for detection
-    MAX_W = 480
+    # Extreme downscale — 320px for fastest video writing
+    MAX_W = 320
     scale = 1.0
     if width > MAX_W:
         scale = MAX_W / width
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Run AI on 1 out of every N frames — target 3 AI frames per second
-    TARGET_AI_FPS = 3
+    # Process 2 frames per second
+    TARGET_AI_FPS = 2
     frame_skip = max(1, int(fps / TARGET_AI_FPS))
 
-    # Output video: write only AI-processed frames at 10 FPS (smooth enough)
-    OUT_FPS = 10.0
+    # Output video matches the skipped framerate
+    OUT_FPS = fps / frame_skip
     out_path = input_path.replace(".mp4", "_result.mp4")
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
     out      = cv2.VideoWriter(out_path, fourcc, OUT_FPS, (width, height))
 
-    # Use faster yolov8n for inference speed (YOLOWorld is too slow on CPU)
     from ultralytics import YOLO
     fast_model = YOLO("yolov8n.pt")
 
@@ -735,20 +734,21 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
 
     try:
         while True:
+            # Fast-forward without decoding using grab()
+            for _ in range(frame_skip - 1):
+                cap.grab()
+                frame_idx += 1
+
             ret, frame = cap.read()
             if not ret:
                 break
             frame_idx += 1
 
-            # Only process every Nth frame
-            if frame_idx % frame_skip != 0:
-                continue
-
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # imgsz=256: fastest inference, still detects hens at close range
-            results = fast_model.track(frame, persist=True, tracker="botsort.yaml",
+            # bytetrack.yaml is significantly faster on CPU than botsort.yaml
+            results = fast_model.track(frame, persist=True, tracker="bytetrack.yaml",
                                        verbose=False, imgsz=256, conf=0.12)
             annotated = results[0].plot() if results else frame.copy()
 
@@ -763,14 +763,13 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
 
             total_unique = len(unique_ids)
             label = f"Hens: {total_unique}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.85, 2)
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
             cv2.putText(annotated, label, (9, th + 12),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
             out.write(annotated)
 
-            # Update progress (based on frames read, not just AI frames)
             progress = min(99, int(frame_idx / total_frames * 100))
             jobs_dict[job_id]["progress"] = progress
 
