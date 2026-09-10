@@ -660,3 +660,11 @@ async def stream_uploaded_video(path: str):
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
+@router.get("/stream-uploaded-count")
+async def stream_uploaded_count(path: str):
+    """Fetch the live count of hens from the currently playing uploaded MJPEG stream."""
+    from app.ai.thermal_service import STREAM_COUNTS
+    
+    count = STREAM_COUNTS.get(path, 0)
+    return {"count": count}
+
