@@ -11,89 +11,21 @@ from ultralytics import YOLO
 _tracking_model = None
 
 def get_tracking_model():
+    """
+    For hen/bird tracking we use yolov8n (COCO 80-class model).
+    The custom egg_detector.pt only has class 'egg' and cannot detect hens.
+    COCO class 14 = 'bird' which matches chickens and hens perfectly.
+    """
     global _tracking_model
     if _tracking_model is None:
         try:
-            # Prioritize existing custom model trained for hens
-            _tracking_model, _ = load_model()
-            if _tracking_model is None:
-                raise ValueError("Custom model not found")
-        except Exception:
-            try:
-                # Fallback to requested YOLO11 or YOLOv8 standard model
-                _tracking_model = YOLO("yolo11n-seg.pt")
-            except Exception:
-                _tracking_model = YOLO("yolov8n-seg.pt")
+            from ultralytics import YOLO
+            _tracking_model = YOLO("yolov8n.pt")  # COCO model — detects 'bird' (class 14) = hens
+            print(f"[Tracking] Loaded yolov8n COCO model. Classes include: bird (14)")
+        except Exception as e:
+            print(f"[Tracking] Failed to load yolov8n.pt: {e}")
+            raise
     return _tracking_model
-
-    def __init__(self, max_disappeared=10, max_distance=60):
-        self.next_object_id = 1
-        self.objects = {}       # {id: (cx, cy)}
-        self.disappeared = {}   # {id: count}
-        self.max_disappeared = max_disappeared
-        self.max_distance = max_distance
-        self.max_id_seen = 0
-
-    def register(self, centroid):
-        self.objects[self.next_object_id] = centroid
-        self.disappeared[self.next_object_id] = 0
-        if self.next_object_id > self.max_id_seen:
-            self.max_id_seen = self.next_object_id
-        self.next_object_id += 1
-
-    def deregister(self, object_id):
-        del self.objects[object_id]
-        del self.disappeared[object_id]
-
-    def update(self, rects):
-        if len(rects) == 0:
-            for object_id in list(self.disappeared.keys()):
-                self.disappeared[object_id] += 1
-                if self.disappeared[object_id] > self.max_disappeared:
-                    self.deregister(object_id)
-            return self.objects
-
-        input_centroids = np.array(
-            [((x1 + x2) // 2, (y1 + y2) // 2) for (x1, y1, x2, y2) in rects], dtype="int"
-        )
-
-        if len(self.objects) == 0:
-            for c in input_centroids:
-                self.register(c)
-        else:
-            object_ids = list(self.objects.keys())
-            object_centroids = list(self.objects.values())
-
-            D = np.zeros((len(object_centroids), len(input_centroids)), dtype="float32")
-            for i, oc in enumerate(object_centroids):
-                for j, ic in enumerate(input_centroids):
-                    D[i, j] = math.sqrt((int(oc[0]) - int(ic[0])) ** 2 + (int(oc[1]) - int(ic[1])) ** 2)
-
-            rows = D.min(axis=1).argsort()
-            cols = D.argmin(axis=1)[rows]
-
-            used_rows, used_cols = set(), set()
-            for row, col in zip(rows, cols):
-                if row in used_rows or col in used_cols:
-                    continue
-                if D[row, col] > self.max_distance:
-                    continue
-                oid = object_ids[row]
-                self.objects[oid] = input_centroids[col]
-                self.disappeared[oid] = 0
-                used_rows.add(row)
-                used_cols.add(col)
-
-            for row in set(range(D.shape[0])).difference(used_rows):
-                oid = object_ids[row]
-                self.disappeared[oid] += 1
-                if self.disappeared[oid] > self.max_disappeared:
-                    self.deregister(oid)
-
-            for col in set(range(D.shape[1])).difference(used_cols):
-                self.register(input_centroids[col])
-
-        return self.objects
 
 
 # ─────────────────────────────────────────────────────────────────────────────
