@@ -56,7 +56,7 @@ export const authApi = {
     api.post('/api/auth/login', { email, password }),
   register: (data: Record<string, unknown>) =>
     api.post('/api/auth/register', data),
-  me: () => api.get('/api/auth/me'),
+  me: () => api.get('/api/auth/me', { timeout: 8000 }),
   logout: () => api.post('/api/auth/logout'),
 }
 

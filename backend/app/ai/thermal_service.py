@@ -733,7 +733,7 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             # Run AI only every N frames
             if frame_idx % frame_skip == 0 or frame_idx == 1:
                 # Run detector (predict bypasses ByteTrack confidence filters)
-                results = tracking_model.predict(frame, verbose=False, imgsz=416, conf=0.25)
+                results = tracking_model.predict(frame, verbose=False, imgsz=416, conf=0.10)
                 
                 last_boxes_data = []
                 current_visible = 0
@@ -925,7 +925,7 @@ async def generate_uploaded_video_stream(input_path: str):
                 
             try:
                 # Run AI (predict bypasses ByteTrack filters)
-                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.25)
+                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.10)
                 rects = []
                 new_boxes_data = []
                 
