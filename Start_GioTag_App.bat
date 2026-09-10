@@ -5,7 +5,7 @@ echo       GioTag App Launcher
 echo ========================================
 echo.
 echo Starting Backend Server...
-start "GioTag Backend" /d "C:\Users\sachi\Downloads\giotag project\backend" cmd /k "call .venv\Scripts\activate.bat && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+start "GioTag Backend" /d "C:\Users\sachi\Downloads\giotag project\backend" cmd /k "call .venv\Scripts\activate.bat && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
 echo Starting Frontend Server...
 start "GioTag Frontend" /d "C:\Users\sachi\Downloads\giotag project\frontend" cmd /k "npm run dev"
