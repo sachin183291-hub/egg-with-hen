@@ -841,9 +841,25 @@ async def generate_uploaded_video_stream(input_path: str):
     frame_idx = 0
     current_boxes = []
     
+    # State for Gen AI
+    genai_count = None
+    genai_requested = False
+    
     # Use a background thread for AI so video never stops or lags
     ai_thread_running = True
     frame_queue = queue.Queue(maxsize=1)
+
+    def genai_worker(first_frame):
+        nonlocal genai_count
+        try:
+            from app.ai.gemini_vision import GeminiVisionDetector
+            detector = GeminiVisionDetector()
+            _, buf = cv2.imencode(".jpg", first_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            res = detector.analyze(buf.tobytes(), target="hens")
+            if res.get("success"):
+                genai_count = res.get("hen_count")
+        except Exception as e:
+            print(f"[Gen AI Error]: {e}")
 
     def ai_worker():
         nonlocal current_boxes, max_visible
@@ -901,6 +917,11 @@ async def generate_uploaded_video_stream(input_path: str):
             if frame_idx % frame_skip == 0 and frame_queue.empty():
                 frame_queue.put(frame.copy())
 
+            # Trigger Gen AI on the first good frame
+            if not genai_requested and frame_idx > 5:
+                genai_requested = True
+                threading.Thread(target=genai_worker, args=(frame.copy(),), daemon=True).start()
+
             annotated = frame.copy()
             # Draw instantly using the latest boxes from the AI thread
             for x1, y1, x2, y2, conf in current_boxes:
@@ -916,16 +937,25 @@ async def generate_uploaded_video_stream(input_path: str):
                 cv2.putText(annotated, label_text, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
             total_unique = max(len(unique_ids), max_visible)
+            
+            # If Gen AI has finished, use its highly accurate count as the final total
+            if genai_count is not None:
+                total_unique = max(total_unique, genai_count)
+                
             STREAM_COUNTS[input_path] = total_unique
             
             label = f"Hens: {total_unique}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
             cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            
+            if genai_count is not None:
+                genai_label = f"Gen AI Confirmed: {genai_count}"
+                (gtw, gth), _ = cv2.getTextSize(genai_label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                cv2.rectangle(annotated, (width - gtw - 20, 5), (width - 5, gth + 18), (0, 0, 0), -1)
+                cv2.putText(annotated, genai_label, (width - gtw - 15, gth + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 215, 255), 2) # Gold
 
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            total_unique = max(len(unique_ids), max_visible)
-            STREAM_COUNTS[input_path] = total_unique
             
             # Sleep precisely the remaining time of the frame to enforce flawless real-time playback speed
             elapsed = time.time() - start_time
