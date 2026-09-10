@@ -34,6 +34,18 @@ def get_tracking_model():
             print("[Tracking] Loaded yolov8n — COCO class 14 (bird) covers hens")
     return _tracking_model
 
+_fast_model = None
+
+def get_fast_model():
+    """Returns a globally cached yolov8n model for extreme speed video processing."""
+    global _fast_model
+    if _fast_model is None:
+        from ultralytics import YOLO
+        _fast_model = YOLO("yolov8n.pt")
+        print("[Tracking] Loaded ultra-fast yolov8n model globally for background jobs.")
+    return _fast_model
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Core detection — fast OpenCV-based thermal blob detection (NO YOLO needed)
@@ -726,23 +738,21 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
     out      = cv2.VideoWriter(out_path, fourcc, OUT_FPS, (width, height))
 
-    from ultralytics import YOLO
-    fast_model = YOLO("yolov8n.pt")
+    fast_model = get_fast_model()
 
     unique_ids: set = set()
     frame_idx = 0
 
     try:
         while True:
-            # Fast-forward without decoding using grab()
-            for _ in range(frame_skip - 1):
-                cap.grab()
-                frame_idx += 1
-
+            # Jump exactly to the next target frame (instant O(1) skip on most codecs)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret:
                 break
-            frame_idx += 1
+            
+            # Increment by frame skip for the next loop iteration
+            frame_idx += frame_skip
 
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
