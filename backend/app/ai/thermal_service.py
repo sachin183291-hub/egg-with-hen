@@ -14,25 +14,16 @@ _world_model_classes = ["hen", "chicken", "poultry", "bird"]  # Keep it simple a
 
 def get_tracking_model():
     """
-    Use YOLOWorld model for hen detection — it can be told exactly to find 'hen'/'chicken'.
-    Falls back to yolov8n COCO (class 14 = bird) if world model not available.
+    Load standard yolov8n.pt. In a top-down battery cage, ANY distinctly tracked object
+    is a hen, even if the model misclassifies it as a cat or vase due to the angle.
     """
     global _tracking_model
     if _tracking_model is None:
-        # Try YOLOWorld first (already in backend folder)
-        world_path = os.path.join(os.path.dirname(__file__), "../../yolov8s-world.pt")
-        world_path = os.path.abspath(world_path)
         try:
-            if os.path.exists(world_path):
-                _tracking_model = YOLO(world_path)
-                _tracking_model.set_classes(_world_model_classes)
-                print(f"[Tracking] Loaded YOLOWorld model — classes: {_world_model_classes}")
-            else:
-                raise FileNotFoundError("YOLOWorld not found")
-        except Exception as e:
-            print(f"[Tracking] YOLOWorld unavailable ({e}), falling back to yolov8n COCO")
             _tracking_model = YOLO("yolov8n.pt")
-            print("[Tracking] Loaded yolov8n — COCO class 14 (bird) covers hens")
+            print("[Tracking] Loaded yolov8n for class-agnostic tracking.")
+        except Exception as e:
+            print(f"[Tracking] Error loading YOLO: {e}")
     return _tracking_model
 
 
@@ -759,9 +750,11 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                 
                 if results and results[0].boxes is not None:
                     for box in results[0].boxes:
-                        cls_id   = int(box.cls[0].item())
-                        raw_name = results[0].names.get(cls_id, "").lower()
-                        if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        
+                        # Filter out massive boxes (e.g., the entire cage)
+                        frame_area = frame.shape[0] * frame.shape[1]
+                        if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
                             continue
                         
                         current_visible += 1
@@ -769,7 +762,6 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                             unique_ids.add(int(box.id[0].item()))
                             
                         # Save box for drawing on intermediate frames
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
                         conf = float(box.conf[0].item())
                         last_boxes_data.append((int(x1), int(y1), int(x2), int(y2), conf))
 
@@ -870,16 +862,17 @@ async def generate_uploaded_video_stream(input_path: str):
                 
                 if results and results[0].boxes is not None:
                     for box in results[0].boxes:
-                        cls_id   = int(box.cls[0].item())
-                        raw_name = results[0].names.get(cls_id, "").lower()
-                        if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        
+                        # Filter out massive boxes (background)
+                        frame_area = frame_for_ai.shape[0] * frame_for_ai.shape[1]
+                        if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
                             continue
                         
                         current_vis += 1
                         if box.id is not None:
                             unique_ids.add(int(box.id[0].item()))
                             
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
                         conf = float(box.conf[0].item())
                         new_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
                 
