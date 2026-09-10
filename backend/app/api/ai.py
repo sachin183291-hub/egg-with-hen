@@ -530,8 +530,10 @@ async def thermal_analyze(
             
         from app.ai.thermal_service import process_thermal_image, process_thermal_video
         
+        from fastapi.concurrency import run_in_threadpool
+        
         if is_video:
-            result = process_thermal_video(image_bytes, min_temp, max_temp)
+            result = await run_in_threadpool(process_thermal_video, image_bytes, min_temp, max_temp)
             # We return the video file directly, but pass the count in headers
             headers = {
                 "X-Hen-Count": str(result["hen_count"]),
@@ -544,7 +546,7 @@ async def thermal_analyze(
                 headers=headers
             )
         else:
-            result = process_thermal_image(image_bytes, min_temp, max_temp)
+            result = await run_in_threadpool(process_thermal_image, image_bytes, min_temp, max_temp)
             return result
             
     except Exception as exc:
