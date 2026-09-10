@@ -362,13 +362,15 @@ export default function ThermalCameraPage() {
             </div>
           )}
 
-          {mjpegStreamUrl ? (
+          {mjpegStreamUrl && (
             <div style={{ textAlign: 'center', padding: '40px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <Activity size={48} color="#ef4444" style={{ margin: '0 auto' }} />
               <h3 style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>Counting automatically in real-time...</h3>
               <p style={{ color: 'var(--text-muted)' }}>See the video view on the left for the live count.</p>
             </div>
-          ) : isAnalyzing ? (
+          )}
+
+          {!mjpegStreamUrl && isAnalyzing && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', gap: 16 }}>
               <div className="pulse-ring" style={{ width: '80px', height: '80px', background: '#ef4444', borderRadius: '50%', animation: 'pulse-red 1.5s infinite' }}></div>
               <p style={{ fontSize: '1.1rem', color: '#ef4444', fontWeight: '500' }}>
