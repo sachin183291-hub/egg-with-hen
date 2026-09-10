@@ -10,7 +10,7 @@ from app.ai.yolo_service import load_model
 from ultralytics import YOLO
 
 _tracking_model = None
-_world_model_classes = ["hen", "chicken", "poultry bird"]  # YOLOWorld custom classes
+_world_model_classes = ["hen", "chicken", "poultry bird", "hen head", "chicken head"]  # YOLOWorld custom classes
 
 def get_tracking_model():
     """
@@ -811,9 +811,13 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
 async def generate_uploaded_video_stream(input_path: str):
     """
     Generator that serves an uploaded video as a perfectly smooth MJPEG stream in real-time.
-    Uses smart frame skipping to run YOLOWorld AI at 3 FPS while yielding frames at 25 FPS.
+    Uses a background thread for YOLOWorld AI to ensure the video never stutters.
     """
     import asyncio
+    import threading
+    import queue
+    import numpy as np
+
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         return
@@ -830,7 +834,7 @@ async def generate_uploaded_video_stream(input_path: str):
         width = int(width * scale)
         height = int(height * scale)
 
-    TARGET_AI_FPS = 3
+    TARGET_AI_FPS = 5
     frame_skip = max(1, int(fps / TARGET_AI_FPS))
 
     tracking_model = get_tracking_model()
@@ -838,45 +842,65 @@ async def generate_uploaded_video_stream(input_path: str):
     unique_ids: set = set()
     max_visible = 0
     frame_idx = 0
-    last_boxes_data = []
+    current_boxes = []
+    
+    # Use a background thread for AI so video never stops or lags
+    ai_thread_running = True
+    frame_queue = queue.Queue(maxsize=1)
+
+    def ai_worker():
+        nonlocal current_boxes, max_visible
+        while ai_thread_running:
+            try:
+                frame_for_ai = frame_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+                
+            # Run AI (this takes time, but won't block the video stream)
+            results = tracking_model.track(frame_for_ai, persist=True, tracker="bytetrack.yaml",
+                                           verbose=False, imgsz=416, conf=0.05)
+            new_boxes = []
+            current_vis = 0
+            
+            if results and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    cls_id   = int(box.cls[0].item())
+                    raw_name = results[0].names.get(cls_id, "").lower()
+                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                        continue
+                    
+                    current_vis += 1
+                    if box.id is not None:
+                        unique_ids.add(int(box.id[0].item()))
+                        
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    conf = float(box.conf[0].item())
+                    new_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
+            
+            current_boxes = new_boxes
+            if current_vis > max_visible:
+                max_visible = current_vis
+
+    # Start the background AI worker
+    threading.Thread(target=ai_worker, daemon=True).start()
 
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
-                # Loop video or end
                 break
                 
             frame_idx += 1
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            if frame_idx % frame_skip == 0 or frame_idx == 1:
-                results = tracking_model.track(frame, persist=True, tracker="bytetrack.yaml",
-                                               verbose=False, imgsz=416, conf=0.10)
-                last_boxes_data = []
-                current_visible = 0
-                
-                if results and results[0].boxes is not None:
-                    for box in results[0].boxes:
-                        cls_id   = int(box.cls[0].item())
-                        raw_name = results[0].names.get(cls_id, "").lower()
-                        if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
-                            continue
-                        
-                        current_visible += 1
-                        if box.id is not None:
-                            unique_ids.add(int(box.id[0].item()))
-                            
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-                        conf = float(box.conf[0].item())
-                        last_boxes_data.append((int(x1), int(y1), int(x2), int(y2), conf))
-                
-                if current_visible > max_visible:
-                    max_visible = current_visible
+            # Send frame to AI thread if it's ready
+            if frame_idx % frame_skip == 0 and frame_queue.empty():
+                frame_queue.put(frame.copy())
 
             annotated = frame.copy()
-            for x1, y1, x2, y2, conf in last_boxes_data:
+            # Draw instantly using the latest boxes from the AI thread
+            for x1, y1, x2, y2, conf in current_boxes:
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(annotated, f"Hen", (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
@@ -889,10 +913,21 @@ async def generate_uploaded_video_stream(input_path: str):
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
             
-            # Sleep exactly the duration of one frame to enforce true real-time playback speed
+            # Sleep exactly the duration of one frame to enforce flawless real-time playback speed
             await asyncio.sleep(1.0 / fps)
 
+        # Video Finished: Send a final frame with "FINISHED" text
+        final_frame = np.zeros((height, width, 3), dtype=np.uint8)
+        final_text = f"FINISHED! Final Count: {total_unique}"
+        cv2.putText(final_frame, final_text, (50, height//2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+        _, buf = cv2.imencode(".jpg", final_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        
+        # Keep the final image on screen for a moment before disconnecting
+        await asyncio.sleep(3.0)
+
     finally:
+        ai_thread_running = False
         cap.release()
         try:
             os.remove(input_path)
