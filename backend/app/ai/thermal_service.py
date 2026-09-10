@@ -795,6 +795,86 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     jobs_dict[job_id]["progress"] = 100
     return {"success": True, "hen_count": total_unique, "video_path": out_path}
 
+import math
+from collections import OrderedDict
+
+class CentroidTracker:
+    def __init__(self, max_disappeared=10, max_distance=80):
+        self.next_object_id = 1
+        self.objects = OrderedDict()
+        self.disappeared = OrderedDict()
+        self.max_disappeared = max_disappeared
+        self.max_distance = max_distance
+
+    def register(self, centroid):
+        self.objects[self.next_object_id] = centroid
+        self.disappeared[self.next_object_id] = 0
+        self.next_object_id += 1
+
+    def deregister(self, object_id):
+        del self.objects[object_id]
+        del self.disappeared[object_id]
+
+    def update(self, rects):
+        if len(rects) == 0:
+            for object_id in list(self.disappeared.keys()):
+                self.disappeared[object_id] += 1
+                if self.disappeared[object_id] > self.max_disappeared:
+                    self.deregister(object_id)
+            return self.objects
+
+        input_centroids = np.zeros((len(rects), 2), dtype="int")
+        for (i, (startX, startY, endX, endY)) in enumerate(rects):
+            cX = int((startX + endX) / 2.0)
+            cY = int((startY + endY) / 2.0)
+            input_centroids[i] = (cX, cY)
+
+        if len(self.objects) == 0:
+            for i in range(0, len(input_centroids)):
+                self.register(input_centroids[i])
+        else:
+            object_ids = list(self.objects.keys())
+            object_centroids = list(self.objects.values())
+
+            D = np.zeros((len(object_centroids), len(input_centroids)))
+            for i in range(len(object_centroids)):
+                for j in range(len(input_centroids)):
+                    dx = object_centroids[i][0] - input_centroids[j][0]
+                    dy = object_centroids[i][1] - input_centroids[j][1]
+                    D[i, j] = math.sqrt(dx*dx + dy*dy)
+
+            rows = D.min(axis=1).argsort()
+            cols = D.argmin(axis=1)[rows]
+
+            used_rows = set()
+            used_cols = set()
+
+            for (row, col) in zip(rows, cols):
+                if row in used_rows or col in used_cols:
+                    continue
+                if D[row, col] > self.max_distance:
+                    continue
+
+                object_id = object_ids[row]
+                self.objects[object_id] = input_centroids[col]
+                self.disappeared[object_id] = 0
+                used_rows.add(row)
+                used_cols.add(col)
+
+            unused_rows = set(range(0, D.shape[0])).difference(used_rows)
+            unused_cols = set(range(0, D.shape[1])).difference(used_cols)
+
+            for row in unused_rows:
+                object_id = object_ids[row]
+                self.disappeared[object_id] += 1
+                if self.disappeared[object_id] > self.max_disappeared:
+                    self.deregister(object_id)
+
+            for col in unused_cols:
+                self.register(input_centroids[col])
+
+        return self.objects
+
 STREAM_COUNTS = {}
 
 async def generate_uploaded_video_stream(input_path: str):
@@ -835,25 +915,12 @@ async def generate_uploaded_video_stream(input_path: str):
     frame_idx = 0
     current_boxes = []
     
-    # State for Gen AI
-    genai_count = None
-    genai_requested = False
+    # Simple, highly reliable distance tracker (bypasses YOLO harsh limits)
+    tracker = CentroidTracker(max_disappeared=10, max_distance=60)
     
     # Use a background thread for AI so video never stops or lags
     ai_thread_running = True
     frame_queue = queue.Queue(maxsize=1)
-
-    def genai_worker(first_frame):
-        nonlocal genai_count
-        try:
-            from app.ai.gemini_vision import GeminiVisionDetector
-            detector = GeminiVisionDetector()
-            _, buf = cv2.imencode(".jpg", first_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-            res = detector.analyze(buf.tobytes(), target="hens")
-            if res.get("success"):
-                genai_count = res.get("hen_count")
-        except Exception as e:
-            print(f"[Gen AI Error]: {e}")
 
     def ai_worker():
         nonlocal current_boxes, max_visible
@@ -866,8 +933,8 @@ async def generate_uploaded_video_stream(input_path: str):
             try:
                 # Run AI (predict bypasses ByteTrack filters)
                 results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.01)
-                new_boxes = []
-                current_vis = 0
+                rects = []
+                new_boxes_data = []
                 
                 if results and results[0].boxes is not None:
                     for box in results[0].boxes:
@@ -878,13 +945,31 @@ async def generate_uploaded_video_stream(input_path: str):
                         if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
                             continue
                         
-                        current_vis += 1
-                        conf = float(box.conf[0].item())
-                        new_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
+                        rects.append((int(x1), int(y1), int(x2), int(y2)))
+                        new_boxes_data.append((int(x1), int(y1), int(x2), int(y2), float(box.conf[0].item())))
                 
-                current_boxes = new_boxes
-                if current_vis > max_visible:
-                    max_visible = current_vis
+                # Update our custom tracker
+                objects = tracker.update(rects)
+                
+                # Match IDs to the drawn boxes
+                matched_boxes = []
+                for bx1, by1, bx2, by2, conf in new_boxes_data:
+                    cx, cy = int((bx1+bx2)/2.0), int((by1+by2)/2.0)
+                    best_id = None
+                    best_dist = float('inf')
+                    for obj_id, (ocx, ocy) in objects.items():
+                        dist = math.sqrt((cx-ocx)**2 + (cy-ocy)**2)
+                        if dist < best_dist and dist < tracker.max_distance:
+                            best_dist = dist
+                            best_id = obj_id
+                    
+                    if best_id is not None:
+                        unique_ids.add(best_id)
+                        matched_boxes.append((bx1, by1, bx2, by2, conf, best_id))
+                
+                current_boxes = matched_boxes
+                if len(rects) > max_visible:
+                    max_visible = len(rects)
             except Exception as e:
                 print(f"[AI Thread Error]: {e}")
                 traceback.print_exc()
@@ -907,16 +992,11 @@ async def generate_uploaded_video_stream(input_path: str):
             if frame_idx % frame_skip == 0 and frame_queue.empty():
                 frame_queue.put(frame.copy())
 
-            # Trigger Gen AI on the first good frame
-            if not genai_requested and frame_idx > 5:
-                genai_requested = True
-                threading.Thread(target=genai_worker, args=(frame.copy(),), daemon=True).start()
-
             annotated = frame.copy()
             # Draw instantly using the latest boxes from the AI thread
-            for x1, y1, x2, y2, conf in current_boxes:
-                label_text = f"hen {conf:.2f}"
-                color = (255, 255, 0)  # Cyan in BGR
+            for x1, y1, x2, y2, conf, tid in current_boxes:
+                label_text = f"Hen #{tid}"
+                color = (0, 255, 0)  # Green in BGR
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                 
                 # Draw filled rectangle for text background
@@ -927,23 +1007,12 @@ async def generate_uploaded_video_stream(input_path: str):
                 cv2.putText(annotated, label_text, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
             total_unique = max(len(unique_ids), max_visible)
-            
-            # If Gen AI has finished, use its highly accurate count as the final total
-            if genai_count is not None:
-                total_unique = max(total_unique, genai_count)
-                
             STREAM_COUNTS[input_path] = total_unique
             
-            label = f"Hens: {total_unique}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            label = f"Live Unique Hens: {total_unique}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
-            cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            
-            if genai_count is not None:
-                genai_label = f"Gen AI Confirmed: {genai_count}"
-                (gtw, gth), _ = cv2.getTextSize(genai_label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
-                cv2.rectangle(annotated, (width - gtw - 20, 5), (width - 5, gth + 18), (0, 0, 0), -1)
-                cv2.putText(annotated, genai_label, (width - gtw - 15, gth + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 215, 255), 2) # Gold
+            cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
             
