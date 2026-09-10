@@ -693,10 +693,11 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
 def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                       min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     """
-    Process uploaded video fully in a background thread.
-    - Uses YOLOWorld (or yolov8n fallback) for hen detection.
-    - Writes annotated output MP4 at normal FPS.
-    - Updates jobs_dict[job_id]["progress"] (0–100) for frontend polling.
+    Ultra-fast background video processing:
+    - Runs AI on only 3 frames per second (huge CPU saving)
+    - Uses imgsz=256 for fastest inference
+    - Writes output at 10 FPS (only AI-processed frames, no redundant copies)
+    - Updates progress for frontend progress bar
     """
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -707,24 +708,29 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    # Downscale for speed
-    MAX_W = 640
+    # Aggressive downscale — 480px is plenty for detection
+    MAX_W = 480
     scale = 1.0
     if width > MAX_W:
         scale = MAX_W / width
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Process every Nth frame to speed up, write every frame for smooth playback
-    frame_skip = max(1, int(fps / 8))  # run AI at ~8 FPS
+    # Run AI on 1 out of every N frames — target 3 AI frames per second
+    TARGET_AI_FPS = 3
+    frame_skip = max(1, int(fps / TARGET_AI_FPS))
 
+    # Output video: write only AI-processed frames at 10 FPS (smooth enough)
+    OUT_FPS = 10.0
     out_path = input_path.replace(".mp4", "_result.mp4")
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
-    out      = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
+    out      = cv2.VideoWriter(out_path, fourcc, OUT_FPS, (width, height))
 
-    model = get_tracking_model()
+    # Use faster yolov8n for inference speed (YOLOWorld is too slow on CPU)
+    from ultralytics import YOLO
+    fast_model = YOLO("yolov8n.pt")
+
     unique_ids: set = set()
-    last_annotated = None
     frame_idx = 0
 
     try:
@@ -734,38 +740,37 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                 break
             frame_idx += 1
 
+            # Only process every Nth frame
+            if frame_idx % frame_skip != 0:
+                continue
+
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            run_ai = (frame_idx % frame_skip == 0)
-            if run_ai:
-                results = model.track(frame, persist=True, tracker="botsort.yaml",
-                                      verbose=False, imgsz=416, conf=0.15)
-                annotated = results[0].plot() if results else frame.copy()
+            # imgsz=256: fastest inference, still detects hens at close range
+            results = fast_model.track(frame, persist=True, tracker="botsort.yaml",
+                                       verbose=False, imgsz=256, conf=0.12)
+            annotated = results[0].plot() if results else frame.copy()
 
-                if results and results[0].boxes is not None:
-                    for box in results[0].boxes:
-                        cls_id   = int(box.cls[0].item())
-                        raw_name = results[0].names.get(cls_id, "").lower()
-                        if not any(k in raw_name for k in ("hen","bird","chicken","animal","poultry")):
-                            continue
-                        if box.id is not None:
-                            unique_ids.add(int(box.id[0].item()))
-
-                last_annotated = annotated
-            else:
-                annotated = last_annotated if last_annotated is not None else frame.copy()
+            if results and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    cls_id   = int(box.cls[0].item())
+                    raw_name = results[0].names.get(cls_id, "").lower()
+                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                        continue
+                    if box.id is not None:
+                        unique_ids.add(int(box.id[0].item()))
 
             total_unique = len(unique_ids)
-            label = f"Hens: {total_unique} unique"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            label = f"Hens: {total_unique}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.85, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
             cv2.putText(annotated, label, (9, th + 12),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.85, (0, 255, 0), 2)
 
             out.write(annotated)
 
-            # Update progress
+            # Update progress (based on frames read, not just AI frames)
             progress = min(99, int(frame_idx / total_frames * 100))
             jobs_dict[job_id]["progress"] = progress
 
