@@ -808,6 +808,8 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     jobs_dict[job_id]["progress"] = 100
     return {"success": True, "hen_count": total_unique, "video_path": out_path}
 
+STREAM_COUNTS = {}
+
 async def generate_uploaded_video_stream(input_path: str):
     """
     Generator that serves an uploaded video as a perfectly smooth MJPEG stream in real-time.
@@ -901,10 +903,20 @@ async def generate_uploaded_video_stream(input_path: str):
             annotated = frame.copy()
             # Draw instantly using the latest boxes from the AI thread
             for x1, y1, x2, y2, conf in current_boxes:
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(annotated, f"Hen", (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                label_text = f"hen {conf:.2f}"
+                color = (255, 255, 0)  # Cyan in BGR
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                
+                # Draw filled rectangle for text background
+                (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+                
+                # Draw text in black over the filled background
+                cv2.putText(annotated, label_text, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
             total_unique = max(len(unique_ids), max_visible)
+            STREAM_COUNTS[input_path] = total_unique
+            
             label = f"Hens: {total_unique}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
