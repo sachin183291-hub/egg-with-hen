@@ -431,6 +431,10 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
                 cls_id = int(box.cls[0].item())
                 raw_class_name = results[0].names.get(cls_id, "unknown").lower()
                 
+                # Only count 'hen' class (or if standard YOLO, class 14 is bird)
+                if "hen" not in raw_class_name and "bird" not in raw_class_name:
+                    continue
+
                 if box.id is not None:
                     track_id = int(box.id[0].item())
                     current_visible += 1
@@ -645,6 +649,9 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
                 for box in results[0].boxes:
                     cls_id = int(box.cls[0].item())
                     raw_name = results[0].names.get(cls_id, "unknown").lower()
+                    # Accept bird, hen, chicken, or animal detections
+                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal")):
+                        continue
                     if box.id is not None:
                         tid = int(box.id[0].item())
                         current_visible += 1
@@ -733,7 +740,7 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             # Run AI only every N frames
             if frame_idx % frame_skip == 0 or frame_idx == 1:
                 # Run detector (predict bypasses ByteTrack confidence filters)
-                results = tracking_model.predict(frame, verbose=False, imgsz=416, conf=0.10)
+                results = tracking_model.predict(frame, verbose=False, imgsz=416, conf=0.01)
                 
                 last_boxes_data = []
                 current_visible = 0

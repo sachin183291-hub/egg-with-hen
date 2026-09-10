@@ -3,13 +3,14 @@ import cv2
 import numpy as np
 import base64
 # pyrefly: ignore [missing-import]
-from ultralytics import YOLO
+from ultralytics import YOLO, YOLOWorld
 
 # Global model instances
 model = None
 tray_model = None
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "egg_detector.pt")
 ALT_MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../models/best.pt"))
+FALLBACK_MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../yolov8s-world.pt"))
 
 def load_model():
     global model
@@ -25,7 +26,17 @@ def load_model():
             else:
                 print(f"Custom model not found. Using standard YOLOv8n as fallback.")
                 model = YOLO("yolov8n.pt") 
-                return model, None
+                
+            # Check if custom model has tray class or hen class
+            has_tray = any("tray" in name.lower() for name in model.names.values())
+            has_hen = any("hen" in name.lower() or "bird" in name.lower() or "chicken" in name.lower() for name in model.names.values())
+            
+            if not has_tray or not has_hen:
+                print("Custom model lacks 'tray' or 'hen' class. Loading YOLO-World for trays and hens.")
+                tray_model_path = FALLBACK_MODEL_PATH if os.path.exists(FALLBACK_MODEL_PATH) else "yolov8s-worldv2.pt"
+                tray_model = YOLOWorld(tray_model_path)
+                tray_model.set_classes(["egg tray", "hen"])
+                
         except Exception as e:
             print(f"Error loading model: {e}")
             raise e
@@ -67,7 +78,7 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
             cls_id = int(box.cls[0].cpu().numpy())
             
             raw_class_name = class_names.get(cls_id, "unknown").lower()
-            if "hen" in raw_class_name:
+            if "hen" in raw_class_name or "bird" in raw_class_name or "chicken" in raw_class_name:
                 class_name = "hen"
             elif is_tray_only or "tray" in raw_class_name:
                 class_name = "egg_tray"
