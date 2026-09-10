@@ -221,11 +221,27 @@ export default function ThermalCameraPage() {
           )}
 
           {activeTab === 'upload' && previewUrl && (
-            <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+            <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: videoStreamUrl ? '2px solid #ef4444' : '1px solid var(--border)' }}>
               {isVideo ? (
-                <video src={previewUrl} controls style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
+                <video
+                  src={previewUrl}
+                  controls
+                  autoPlay={!!videoStreamUrl}  
+                  loop
+                  muted
+                  style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }}
+                />
               ) : (
                 <img src={previewUrl} alt="Selected view" style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
+              )}
+              {videoStreamUrl && (
+                <div style={{
+                  position: 'absolute', top: '10px', left: '10px',
+                  background: 'rgba(0,0,0,0.7)', color: '#fff',
+                  borderRadius: '6px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600
+                }}>
+                  📹 Original
+                </div>
               )}
               <button
                 onClick={reset}
@@ -256,12 +272,12 @@ export default function ThermalCameraPage() {
               {isAnalyzing ? (
                 <>
                   <div className="spinner" style={{ width: '20px', height: '20px', borderTopColor: 'white' }}></div>
-                  {isVideo ? 'Processing Video with YOLO AI... (may take 1-3 mins)' : 'Applying Thermal Filter & Counting...'}
+                  {isVideo ? 'Uploading video...' : 'Applying Thermal Filter & Counting...'}
                 </>
               ) : (
                 <>
                   <Activity size={20} />
-                  Analyze Temperature Hotspots
+                  {isVideo ? '🐔 Analyze & Count Hens Live' : 'Analyze Temperature Hotspots'}
                 </>
               )}
             </button>
