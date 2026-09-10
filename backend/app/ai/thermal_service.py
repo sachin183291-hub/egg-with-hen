@@ -725,9 +725,6 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     max_visible = 0
     frame_idx = 0
     last_boxes_data = []
-    
-    tracker = CentroidTracker(max_disappeared=10, max_distance=60)
-    bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=16, detectShadows=False)
 
     try:
         while True:
@@ -921,9 +918,6 @@ async def generate_uploaded_video_stream(input_path: str):
     # Simple, highly reliable distance tracker (bypasses YOLO harsh limits)
     tracker = CentroidTracker(max_disappeared=10, max_distance=60)
     
-    # Background Subtractor for hyper-sensitive motion detection of heads
-    bg_subtractor = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=16, detectShadows=False)
-    
     # Use a background thread for AI so video never stops or lags
     ai_thread_running = True
     frame_queue = queue.Queue(maxsize=1)
@@ -936,54 +930,23 @@ async def generate_uploaded_video_stream(input_path: str):
             except queue.Empty:
                 continue
                 
-                # 1. Motion & Brightness Blob Detection (Highly sensitive for battery cages)
-                gray = cv2.cvtColor(frame_for_ai, cv2.COLOR_BGR2GRAY)
-                _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
-                motion_mask = bg_subtractor.apply(gray)
-                _, motion_thresh = cv2.threshold(motion_mask, 200, 255, cv2.THRESH_BINARY)
-                
-                # Combine both to catch moving hens AND bright static hens
-                combined_mask = cv2.bitwise_or(thresh, motion_thresh)
-                
-                # Clean up mask
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-                combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
-                combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
-                
-                contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                
+            try:
+                # Run AI (predict bypasses ByteTrack filters)
+                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.01)
                 rects = []
                 new_boxes_data = []
-                frame_area = frame_for_ai.shape[0] * frame_for_ai.shape[1]
                 
-                for c in contours:
-                    area = cv2.contourArea(c)
-                    if 150 < area < (frame_area * 0.1):  # Filter noise and massive blobs
-                        x, y, w, h = cv2.boundingRect(c)
-                        rects.append((x, y, x + w, y + h))
-                        new_boxes_data.append((x, y, x + w, y + h, 0.99))
-                
-                # 2. YOLO Fallback (Catches anything OpenCV missed)
-                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.01)
                 if results and results[0].boxes is not None:
                     for box in results[0].boxes:
                         x1, y1, x2, y2 = box.xyxy[0].tolist()
                         
+                        # Filter out massive boxes (background)
+                        frame_area = frame_for_ai.shape[0] * frame_for_ai.shape[1]
                         if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
                             continue
-                            
-                        # Avoid double-counting if OpenCV already found it
-                        cx, cy = (x1+x2)/2.0, (y1+y2)/2.0
-                        is_duplicate = False
-                        for (rx1, ry1, rx2, ry2) in rects:
-                            if rx1 < cx < rx2 and ry1 < cy < ry2:
-                                is_duplicate = True
-                                break
                         
-                        if not is_duplicate:
-                            rects.append((int(x1), int(y1), int(x2), int(y2)))
-                            new_boxes_data.append((int(x1), int(y1), int(x2), int(y2), float(box.conf[0].item())))
-
+                        rects.append((int(x1), int(y1), int(x2), int(y2)))
+                        new_boxes_data.append((int(x1), int(y1), int(x2), int(y2), float(box.conf[0].item())))
                 
                 # Update our custom tracker
                 objects = tracker.update(rects)
