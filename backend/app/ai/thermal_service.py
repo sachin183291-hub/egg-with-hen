@@ -720,16 +720,16 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    # Extreme downscale — 320px for fastest video writing
-    MAX_W = 320
+    # Downscale for performance, but 640px minimum to keep hens visible
+    MAX_W = 640
     scale = 1.0
     if width > MAX_W:
         scale = MAX_W / width
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Process 2 frames per second
-    TARGET_AI_FPS = 2
+    # Process 5 frames per second (tracker needs smooth motion to assign IDs)
+    TARGET_AI_FPS = 5
     frame_skip = max(1, int(fps / TARGET_AI_FPS))
 
     # Output video matches the skipped framerate
@@ -741,6 +741,7 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     fast_model = get_fast_model()
 
     unique_ids: set = set()
+    max_visible = 0
     frame_idx = 0
 
     try:
@@ -757,21 +758,28 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # bytetrack.yaml is significantly faster on CPU than botsort.yaml
-            results = fast_model.track(frame, persist=True, tracker="bytetrack.yaml",
-                                       verbose=False, imgsz=256, conf=0.12)
+            # Use 416px for better accuracy (256px is too small for hens in cages)
+            results = fast_model.track(frame, persist=True, tracker="botsort.yaml",
+                                       verbose=False, imgsz=416, conf=0.15)
             annotated = results[0].plot() if results else frame.copy()
 
+            current_visible = 0
             if results and results[0].boxes is not None:
                 for box in results[0].boxes:
                     cls_id   = int(box.cls[0].item())
                     raw_name = results[0].names.get(cls_id, "").lower()
                     if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
                         continue
+                    
+                    current_visible += 1
                     if box.id is not None:
                         unique_ids.add(int(box.id[0].item()))
 
-            total_unique = len(unique_ids)
+            if current_visible > max_visible:
+                max_visible = current_visible
+
+            # Fallback: if tracker fails to assign IDs, at least show max visible hens
+            total_unique = max(len(unique_ids), max_visible)
             label = f"Hens: {total_unique}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
