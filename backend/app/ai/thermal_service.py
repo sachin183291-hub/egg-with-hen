@@ -5,9 +5,25 @@ import os
 import tempfile
 from typing import Dict, Any, Tuple, List
 import math
+from app.ai.yolo_service import load_model
+from ultralytics import YOLO
 
+_tracking_model = None
 
-class CentroidTracker:
+def get_tracking_model():
+    global _tracking_model
+    if _tracking_model is None:
+        try:
+            # Attempt to use the requested YOLO11 segmentation model
+            _tracking_model = YOLO("yolo11n-seg.pt")
+        except Exception:
+            try:
+                _tracking_model = YOLO("yolov8n-seg.pt")
+            except Exception:
+                # Fallback to existing custom model or YOLOv8n
+                _tracking_model, _ = load_model()
+    return _tracking_model
+
     def __init__(self, max_disappeared=10, max_distance=60):
         self.next_object_id = 1
         self.objects = {}       # {id: (cx, cy)}
@@ -389,7 +405,8 @@ def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: 
 def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     """
     Accept raw video bytes (from the API upload), write to a temp file,
-    process frame-by-frame, and return the annotated output video path + count.
+    process frame-by-frame using YOLO + BoT-SORT tracking for unique hen counting,
+    and return the annotated output video path + count.
     """
     # ── Write incoming bytes to a temp input file ────────────────────────────
     suffix_in  = ".mp4"
@@ -432,35 +449,34 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         cap.release()
         raise ValueError("Could not open VideoWriter with any available codec.")
 
-    tracker                  = CentroidTracker(max_disappeared=5, max_distance=80)
-    frame_idx                = 0
-    SKIP                     = 15   # process every 15th frame
-    peak_simultaneous_count  = 0    # max hens visible AT THE SAME TIME in any frame
+    model = get_tracking_model()
+    unique_hen_ids = set()
+    frame_idx = 0
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        if frame_idx % SKIP == 0:
-            annotated_frame, _, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
-        else:
-            # Light tracking-only frame — draw current tracked centroids cheaply
-            annotated_frame = frame.copy()
-            for oid, centroid in tracker.objects.items():
-                cx, cy = int(centroid[0]), int(centroid[1])
-                cv2.circle(annotated_frame, (cx, cy), 18, (0, 200, 100), 2)
-                cv2.putText(annotated_frame, f"ID:{oid}", (cx - 20, cy - 22),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+        # Run tracking using BoT-SORT + Re-ID (built into Ultralytics YOLO)
+        results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False)
+        annotated_frame = results[0].plot() if len(results) > 0 else frame.copy()
 
-        # ── Peak simultaneous count (correct flock size) ──────────────────────
-        current_visible = len(tracker.objects)
-        if current_visible > peak_simultaneous_count:
-            peak_simultaneous_count = current_visible
+        current_visible = 0
+        if len(results) > 0 and results[0].boxes is not None:
+            for box in results[0].boxes:
+                # If using standard YOLO, class 14 or 16 might be bird/dog.
+                # If custom model, 'hen' class is used.
+                if box.id is not None:
+                    track_id = int(box.id[0].item())
+                    unique_hen_ids.add(track_id)
+                    current_visible += 1
 
-        # Count overlay — show current visible hens on frame
+        total_unique = len(unique_hen_ids)
+
+        # Count overlay
         s_scale = max(0.55, width * 0.001)
-        summary = f"Hens Detected: {peak_simultaneous_count} (now: {current_visible})"
+        summary = f"Total Unique Hens: {total_unique} (now: {current_visible})"
         (sw2, _), _ = cv2.getTextSize(summary, cv2.FONT_HERSHEY_SIMPLEX, s_scale, 2)
         cv2.rectangle(annotated_frame, (5, 5), (sw2 + 14, 34), (0, 0, 0), -1)
         cv2.putText(annotated_frame, summary, (9, 28), cv2.FONT_HERSHEY_SIMPLEX, s_scale, (0, 255, 0), 2)
@@ -468,7 +484,7 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         out.write(annotated_frame)
         frame_idx += 1
 
-    total_count = peak_simultaneous_count  # ✅ Correct: max simultaneously visible
+    total_count = len(unique_hen_ids)
     cap.release()
     out.release()
 
@@ -526,8 +542,8 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
         if not cap.isOpened():
             return
 
-    tracker                 = CentroidTracker(max_disappeared=15, max_distance=80)
-    peak_simultaneous_count = 0   # max hens visible at same time
+    model = get_tracking_model()
+    unique_hen_ids = set()
 
     os.makedirs("storage", exist_ok=True)
     timestamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -548,24 +564,22 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                 out = cv2.VideoWriter(out_video_path, fourcc, fps, (w, h))
 
-            if frame_idx % 15 == 0:
-                annotated, _, _ = detect_thermal_hotspots(frame, min_temp, max_temp, tracker)
-            else:
-                annotated = frame.copy()
-                for oid, centroid in tracker.objects.items():
-                    cx, cy = int(centroid[0]), int(centroid[1])
-                    cv2.circle(annotated, (cx, cy), 18, (0, 200, 100), 2)
-                    cv2.putText(annotated, f"ID:{oid}", (cx - 20, cy - 22),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+            results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False)
+            annotated = results[0].plot() if len(results) > 0 else frame.copy()
 
-            # ── Peak simultaneous count (correct flock size) ──────────────
-            current_visible = len(tracker.objects)
-            if current_visible > peak_simultaneous_count:
-                peak_simultaneous_count = current_visible
+            current_visible = 0
+            if len(results) > 0 and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    if box.id is not None:
+                        track_id = int(box.id[0].item())
+                        unique_hen_ids.add(track_id)
+                        current_visible += 1
 
-            # Count overlay — show peak & current
-            cv2.rectangle(annotated, (5, 5), (340, 36), (0, 0, 0), -1)
-            cv2.putText(annotated, f"Live Hens: {peak_simultaneous_count} (now: {current_visible})",
+            total_unique = len(unique_hen_ids)
+
+            # Count overlay — show total unique & current
+            cv2.rectangle(annotated, (5, 5), (420, 36), (0, 0, 0), -1)
+            cv2.putText(annotated, f"Total Unique Hens: {total_unique} (now: {current_visible})",
                         (9, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
 
             if out:
@@ -581,4 +595,4 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
         if out:
             out.release()
         LATEST_STREAM_RECORD["video_path"]  = out_video_path
-        LATEST_STREAM_RECORD["final_count"] = peak_simultaneous_count  # ✅ correct count
+        LATEST_STREAM_RECORD["final_count"] = len(unique_hen_ids)
