@@ -1,6 +1,7 @@
 """AI verification API endpoints."""
 from datetime import datetime
 from typing import Optional
+import os
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -13,6 +14,9 @@ from app.services.audit import log_action
 from app.services.storage import storage
 
 router = APIRouter(prefix="/api/ai", tags=["AI Verification"])
+
+# In-memory store for background video processing jobs
+VIDEO_JOBS: dict = {}
 
 
 @router.post("/verify/{evidence_id}", response_model=AIVerifyResult)
@@ -533,14 +537,30 @@ async def thermal_analyze(
         from fastapi.concurrency import run_in_threadpool
         
         if is_video:
-            import tempfile
-            import os
-            # Save uploaded video to temp file
+            import tempfile, os, threading, uuid
+            from app.ai.thermal_service import process_video_job
+
+            # Save uploaded bytes to temp file
             tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", prefix="upload_")
             tmp_in.write(image_bytes)
             tmp_in.flush()
             tmp_in.close()
-            return {"success": True, "video_id": os.path.basename(tmp_in.name), "is_video": True}
+
+            job_id = str(uuid.uuid4())
+            VIDEO_JOBS[job_id] = {"status": "processing", "progress": 0, "video_path": None, "hen_count": 0, "error": None}
+
+            def run_job():
+                try:
+                    result = process_video_job(tmp_in.name, job_id, VIDEO_JOBS, min_temp, max_temp)
+                    VIDEO_JOBS[job_id]["status"]     = "done"
+                    VIDEO_JOBS[job_id]["video_path"] = result["video_path"]
+                    VIDEO_JOBS[job_id]["hen_count"]  = result["hen_count"]
+                except Exception as e:
+                    VIDEO_JOBS[job_id]["status"] = "error"
+                    VIDEO_JOBS[job_id]["error"]  = str(e)
+
+            threading.Thread(target=run_job, daemon=True).start()
+            return {"success": True, "job_id": job_id, "is_video": True}
         else:
             result = await run_in_threadpool(process_thermal_image, image_bytes, min_temp, max_temp)
             return result
@@ -550,25 +570,26 @@ async def thermal_analyze(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error processing thermal media: {str(exc)}")
 
-@router.get("/stream-uploaded-video")
-async def stream_uploaded_video_endpoint(video_id: str):
-    import os
-    import tempfile
-    from fastapi.responses import StreamingResponse
-    from app.ai.thermal_service import stream_uploaded_video
+@router.get("/video-job-status/{job_id}")
+async def video_job_status(job_id: str):
+    """Poll for background video processing status."""
+    job = VIDEO_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
-    # Safely construct path in temp directory
-    safe_filename = os.path.basename(video_id)
-    file_path = os.path.join(tempfile.gettempdir(), safe_filename)
-    
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="Uploaded video not found.")
-        
-    stream = stream_uploaded_video(file_path)
-    return StreamingResponse(
-        stream,
-        media_type="multipart/x-mixed-replace; boundary=frame"
-    )
+@router.get("/serve-video/{job_id}")
+async def serve_video(job_id: str):
+    """Stream the fully-processed video file at normal speed."""
+    from fastapi.responses import FileResponse
+    job = VIDEO_JOBS.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(status_code=404, detail="Video not ready")
+    path = job["video_path"]
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Video file missing")
+    return FileResponse(path, media_type="video/mp4", filename="hen_count_result.mp4")
+
 
 @router.get("/drone-stream")
 async def drone_stream(ip: str):

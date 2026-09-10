@@ -9,22 +9,29 @@ from app.ai.yolo_service import load_model
 from ultralytics import YOLO
 
 _tracking_model = None
+_world_model_classes = ["hen", "chicken", "poultry bird"]  # YOLOWorld custom classes
 
 def get_tracking_model():
     """
-    For hen/bird tracking we use yolov8n (COCO 80-class model).
-    The custom egg_detector.pt only has class 'egg' and cannot detect hens.
-    COCO class 14 = 'bird' which matches chickens and hens perfectly.
+    Use YOLOWorld model for hen detection — it can be told exactly to find 'hen'/'chicken'.
+    Falls back to yolov8n COCO (class 14 = bird) if world model not available.
     """
     global _tracking_model
     if _tracking_model is None:
+        # Try YOLOWorld first (already in backend folder)
+        world_path = os.path.join(os.path.dirname(__file__), "../../yolov8s-world.pt")
+        world_path = os.path.abspath(world_path)
         try:
-            from ultralytics import YOLO
-            _tracking_model = YOLO("yolov8n.pt")  # COCO model — detects 'bird' (class 14) = hens
-            print(f"[Tracking] Loaded yolov8n COCO model. Classes include: bird (14)")
+            if os.path.exists(world_path):
+                _tracking_model = YOLO(world_path)
+                _tracking_model.set_classes(_world_model_classes)
+                print(f"[Tracking] Loaded YOLOWorld model — classes: {_world_model_classes}")
+            else:
+                raise FileNotFoundError("YOLOWorld not found")
         except Exception as e:
-            print(f"[Tracking] Failed to load yolov8n.pt: {e}")
-            raise
+            print(f"[Tracking] YOLOWorld unavailable ({e}), falling back to yolov8n COCO")
+            _tracking_model = YOLO("yolov8n.pt")
+            print("[Tracking] Loaded yolov8n — COCO class 14 (bird) covers hens")
     return _tracking_model
 
 
@@ -678,3 +685,97 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
             os.remove(video_path)
         except Exception:
             pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Background job: process full video, write annotated MP4, report progress
+# ─────────────────────────────────────────────────────────────────────────────
+def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
+                      min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
+    """
+    Process uploaded video fully in a background thread.
+    - Uses YOLOWorld (or yolov8n fallback) for hen detection.
+    - Writes annotated output MP4 at normal FPS.
+    - Updates jobs_dict[job_id]["progress"] (0–100) for frontend polling.
+    """
+    cap = cv2.VideoCapture(input_path)
+    if not cap.isOpened():
+        raise ValueError("Cannot open video file")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
+
+    # Downscale for speed
+    MAX_W = 640
+    scale = 1.0
+    if width > MAX_W:
+        scale = MAX_W / width
+        width  = int(width * scale)
+        height = int(height * scale)
+
+    # Process every Nth frame to speed up, write every frame for smooth playback
+    frame_skip = max(1, int(fps / 8))  # run AI at ~8 FPS
+
+    out_path = input_path.replace(".mp4", "_result.mp4")
+    fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
+    out      = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
+
+    model = get_tracking_model()
+    unique_ids: set = set()
+    last_annotated = None
+    frame_idx = 0
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame_idx += 1
+
+            if scale != 1.0:
+                frame = cv2.resize(frame, (width, height))
+
+            run_ai = (frame_idx % frame_skip == 0)
+            if run_ai:
+                results = model.track(frame, persist=True, tracker="botsort.yaml",
+                                      verbose=False, imgsz=416, conf=0.15)
+                annotated = results[0].plot() if results else frame.copy()
+
+                if results and results[0].boxes is not None:
+                    for box in results[0].boxes:
+                        cls_id   = int(box.cls[0].item())
+                        raw_name = results[0].names.get(cls_id, "").lower()
+                        if not any(k in raw_name for k in ("hen","bird","chicken","animal","poultry")):
+                            continue
+                        if box.id is not None:
+                            unique_ids.add(int(box.id[0].item()))
+
+                last_annotated = annotated
+            else:
+                annotated = last_annotated if last_annotated is not None else frame.copy()
+
+            total_unique = len(unique_ids)
+            label = f"Hens: {total_unique} unique"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
+            cv2.putText(annotated, label, (9, th + 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+
+            out.write(annotated)
+
+            # Update progress
+            progress = min(99, int(frame_idx / total_frames * 100))
+            jobs_dict[job_id]["progress"] = progress
+
+    finally:
+        cap.release()
+        out.release()
+        try:
+            os.remove(input_path)
+        except Exception:
+            pass
+
+    jobs_dict[job_id]["progress"] = 100
+    return {"success": True, "hen_count": len(unique_ids), "video_path": out_path}

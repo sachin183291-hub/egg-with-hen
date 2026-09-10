@@ -12,8 +12,9 @@ export default function ThermalCameraPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null)
-  // Live stream URL for uploaded video — set after upload succeeds
   const [videoStreamUrl, setVideoStreamUrl] = useState<string | null>(null)
+  const [videoJobId, setVideoJobId] = useState<string | null>(null)
+  const [processingProgress, setProcessingProgress] = useState(0)
 
   // Live Stream State
   const [activeTab, setActiveTab] = useState<'upload' | 'live'>('upload')
@@ -22,6 +23,31 @@ export default function ThermalCameraPage() {
   const [finalRecord, setFinalRecord] = useState<{ count: number, videoUrl: string } | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const API_URL = import.meta.env.VITE_API_URL || ''
+
+  // Poll for job completion
+  const pollJobStatus = async (jobId: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/ai/video-job-status/${jobId}`)
+        const job = await res.json()
+        setProcessingProgress(job.progress || 0)
+        if (job.status === 'done') {
+          clearInterval(interval)
+          const videoUrl = `${API_URL}/api/ai/serve-video/${jobId}`
+          setProcessedVideoUrl(videoUrl)
+          setResult({ is_video: true, hen_count: job.hen_count })
+          setIsAnalyzing(false)
+        } else if (job.status === 'error') {
+          clearInterval(interval)
+          setError(`Processing failed: ${job.error}`)
+          setIsAnalyzing(false)
+        }
+      } catch {
+        // ignore poll errors, will retry
+      }
+    }, 2000)
+  }
+
 
   const connectLiveStream = () => {
     const ip = localStorage.getItem('droneIP')
@@ -70,6 +96,9 @@ export default function ThermalCameraPage() {
     setIsAnalyzing(true)
     setError(null)
     setVideoStreamUrl(null)
+    setProcessedVideoUrl(null)
+    setProcessingProgress(0)
+    setVideoJobId(null)
 
     try {
       const formData = new FormData()
@@ -78,13 +107,14 @@ export default function ThermalCameraPage() {
       formData.append('max_temp', '40.0')
 
       if (isVideo) {
-        // Upload the video — backend saves it and returns a video_id instantly
+        // Upload the video — backend starts background job and returns job_id instantly
         const response = await aiApi.thermalAnalyzeVideo(formData)
-        const { video_id } = response.data
-        // Build the live MJPEG stream URL
-        const streamUrl = `${API_URL}/api/ai/stream-uploaded-video?video_id=${encodeURIComponent(video_id)}`
-        setVideoStreamUrl(streamUrl)
-        setResult({ is_video: true, video_id })
+        const { job_id } = response.data
+        setVideoJobId(job_id)
+        // Start polling — setIsAnalyzing(false) happens inside pollJobStatus when done
+        pollJobStatus(job_id)
+        // Don't call setIsAnalyzing(false) here!
+        return
       } else {
         const response = await aiApi.thermalAnalyze(formData)
         setResult(response.data)
@@ -102,7 +132,7 @@ export default function ThermalCameraPage() {
       }
       setError(`Error: ${errorMessage}`)
     } finally {
-      setIsAnalyzing(false)
+      if (!isVideo) setIsAnalyzing(false)
     }
   }
 
@@ -113,6 +143,8 @@ export default function ThermalCameraPage() {
     setResult(null)
     setProcessedVideoUrl(null)
     setVideoStreamUrl(null)
+    setVideoJobId(null)
+    setProcessingProgress(0)
     setError(null)
     setIsAnalyzing(false)
   }
@@ -305,34 +337,45 @@ export default function ThermalCameraPage() {
           )}
 
           {isAnalyzing && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%' }}>
-              <div className="pulse-ring" style={{ width: '80px', height: '80px', background: '#ef4444', borderRadius: '50%', marginBottom: '24px', animation: 'pulse-red 1.5s infinite' }}></div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', gap: 16 }}>
+              <div className="pulse-ring" style={{ width: '80px', height: '80px', background: '#ef4444', borderRadius: '50%', animation: 'pulse-red 1.5s infinite' }}></div>
               <p style={{ fontSize: '1.1rem', color: '#ef4444', fontWeight: '500' }}>
-                {isVideo ? 'Uploading video...' : 'Processing thermal mapping...'}
+                {videoJobId ? `🐔 AI Processing... ${processingProgress}%` : (isVideo ? 'Uploading video...' : 'Processing...')}
               </p>
-              {isVideo && <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Live stream will appear instantly after upload</p>}
+              {videoJobId && (
+                <div style={{ width: '80%', background: 'rgba(239,68,68,0.15)', borderRadius: 8, height: 12, overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%', width: `${processingProgress}%`,
+                    background: 'linear-gradient(90deg,#ef4444,#f97316)',
+                    borderRadius: 8, transition: 'width 0.5s ease'
+                  }} />
+                </div>
+              )}
+              {videoJobId && <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Detecting hens with YOLOWorld AI — please wait...</p>}
             </div>
           )}
 
           {result && (
             <div className="fade-in">
 
-              {/* Live MJPEG stream for uploaded videos */}
-              {isVideo && videoStreamUrl && (
+              {/* Final processed video at normal speed */}
+              {isVideo && processedVideoUrl && (
                 <div style={{ marginBottom: '20px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                    <span style={{ width: 10, height: 10, background: '#ef4444', borderRadius: '50%', display: 'inline-block', animation: 'pulse-red 1.5s infinite' }} />
-                    <span style={{ fontSize: '0.9rem', color: '#ef4444', fontWeight: '600' }}>LIVE — AI Tracking in Progress</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '0.9rem', color: '#22c55e', fontWeight: '700' }}>✅ Processing Complete!</span>
+                    <span style={{ fontSize: '1.1rem', color: '#ef4444', fontWeight: '800' }}>🐔 {result.hen_count} Hens Counted</span>
                   </div>
-                  <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '2px solid #ef4444' }}>
-                    <img
-                      src={videoStreamUrl}
-                      alt="Live YOLO Tracking Stream"
-                      style={{ width: '100%', height: 'auto', maxHeight: '420px', objectFit: 'contain', display: 'block', background: '#000' }}
+                  <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '2px solid #22c55e' }}>
+                    <video
+                      src={processedVideoUrl}
+                      controls
+                      autoPlay
+                      loop
+                      style={{ width: '100%', height: 'auto', maxHeight: '420px', display: 'block', background: '#000' }}
                     />
                   </div>
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}>
-                    The counter shown on the video is updating live. Stream ends automatically when the video finishes.
+                    Video plays at normal speed. Green boxes = detected hens. Count shown in top-left corner.
                   </p>
                 </div>
               )}
