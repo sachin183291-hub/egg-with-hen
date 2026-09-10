@@ -12,6 +12,8 @@ export default function ThermalCameraPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null)
+  // Live stream URL for uploaded video — set after upload succeeds
+  const [videoStreamUrl, setVideoStreamUrl] = useState<string | null>(null)
 
   // Live Stream State
   const [activeTab, setActiveTab] = useState<'upload' | 'live'>('upload')
@@ -67,6 +69,7 @@ export default function ThermalCameraPage() {
     if (!selectedImage) return
     setIsAnalyzing(true)
     setError(null)
+    setVideoStreamUrl(null)
 
     try {
       const formData = new FormData()
@@ -75,13 +78,13 @@ export default function ThermalCameraPage() {
       formData.append('max_temp', '40.0')
 
       if (isVideo) {
+        // Upload the video — backend saves it and returns a video_id instantly
         const response = await aiApi.thermalAnalyzeVideo(formData)
-        const videoBlob = new Blob([response.data], { type: 'video/mp4' })
-        const url = URL.createObjectURL(videoBlob)
-        setProcessedVideoUrl(url)
-
-        const countHeader = response.headers['x-hen-count']
-        setResult({ hen_count: countHeader ? parseInt(countHeader, 10) : 0, is_video: true })
+        const { video_id } = response.data
+        // Build the live MJPEG stream URL
+        const streamUrl = `${API_URL}/api/ai/stream-uploaded-video?video_id=${encodeURIComponent(video_id)}`
+        setVideoStreamUrl(streamUrl)
+        setResult({ is_video: true, video_id })
       } else {
         const response = await aiApi.thermalAnalyze(formData)
         setResult(response.data)
@@ -89,11 +92,7 @@ export default function ThermalCameraPage() {
     } catch (err: any) {
       let errorMessage = 'Failed to process thermal media.'
       try {
-        if (err.response?.data instanceof Blob) {
-          const text = await err.response.data.text()
-          const json = JSON.parse(text)
-          errorMessage = json.detail || text || errorMessage
-        } else if (err.response?.data?.detail) {
+        if (err.response?.data?.detail) {
           errorMessage = err.response.data.detail
         } else if (err.message) {
           errorMessage = err.message
@@ -113,6 +112,7 @@ export default function ThermalCameraPage() {
     setIsVideo(false)
     setResult(null)
     setProcessedVideoUrl(null)
+    setVideoStreamUrl(null)
     setError(null)
     setIsAnalyzing(false)
   }
@@ -291,27 +291,51 @@ export default function ThermalCameraPage() {
           {isAnalyzing && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%' }}>
               <div className="pulse-ring" style={{ width: '80px', height: '80px', background: '#ef4444', borderRadius: '50%', marginBottom: '24px', animation: 'pulse-red 1.5s infinite' }}></div>
-              <p style={{ fontSize: '1.1rem', color: '#ef4444', fontWeight: '500' }}>Processing thermal mapping...</p>
-              {isVideo && <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>(Video processing may take a few moments)</p>}
+              <p style={{ fontSize: '1.1rem', color: '#ef4444', fontWeight: '500' }}>
+                {isVideo ? 'Uploading video...' : 'Processing thermal mapping...'}
+              </p>
+              {isVideo && <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Live stream will appear instantly after upload</p>}
             </div>
           )}
 
           {result && (
             <div className="fade-in">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '20px', padding: '20px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)' }}>
-                <div>
-                  <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#ef4444', fontWeight: '700', marginBottom: '4px' }}>
-                    {isVideo ? 'Peak Hens Detected' : 'Hens Detected (Thermal)'}
+
+              {/* Live MJPEG stream for uploaded videos */}
+              {isVideo && videoStreamUrl && (
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                    <span style={{ width: 10, height: 10, background: '#ef4444', borderRadius: '50%', display: 'inline-block', animation: 'pulse-red 1.5s infinite' }} />
+                    <span style={{ fontSize: '0.9rem', color: '#ef4444', fontWeight: '600' }}>LIVE — AI Tracking in Progress</span>
                   </div>
-                  <div style={{ fontSize: '2.8rem', fontWeight: '800', color: '#ef4444', lineHeight: 1 }}>{result.hen_count}</div>
-                  <div style={{ fontSize: '0.8rem', color: '#ef4444', marginTop: '4px' }}>Temperature filter: 20°C – 40°C</div>
+                  <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '2px solid #ef4444' }}>
+                    <img
+                      src={videoStreamUrl}
+                      alt="Live YOLO Tracking Stream"
+                      style={{ width: '100%', height: 'auto', maxHeight: '420px', objectFit: 'contain', display: 'block', background: '#000' }}
+                    />
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}>
+                    The counter shown on the video is updating live. Stream ends automatically when the video finishes.
+                  </p>
                 </div>
-                <div style={{ flex: 1, textAlign: 'right', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                  {result.hen_count > 0
-                    ? `Avg: ${(result.hens?.reduce((a: number, h: any) => a + h.temperature, 0) / (result.hens?.length || 1)).toFixed(1)}°C`
-                    : 'No hens detected in range'}
+              )}
+
+              {/* Image result stats */}
+              {!isVideo && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '20px', padding: '20px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  <div>
+                    <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#ef4444', fontWeight: '700', marginBottom: '4px' }}>Hens Detected (Thermal)</div>
+                    <div style={{ fontSize: '2.8rem', fontWeight: '800', color: '#ef4444', lineHeight: 1 }}>{result.hen_count}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#ef4444', marginTop: '4px' }}>Temperature filter: 20°C – 40°C</div>
+                  </div>
+                  <div style={{ flex: 1, textAlign: 'right', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                    {result.hen_count > 0
+                      ? `Avg: ${(result.hens?.reduce((a: number, h: any) => a + h.temperature, 0) / (result.hens?.length || 1)).toFixed(1)}°C`
+                      : 'No hens detected in range'}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {result.hens && result.hens.length > 0 && (
                 <div style={{ marginBottom: '16px', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}>
@@ -356,12 +380,6 @@ export default function ThermalCameraPage() {
                       })}
                     </tbody>
                   </table>
-                </div>
-              )}
-
-              {isVideo && processedVideoUrl && (
-                <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', marginTop: '16px' }}>
-                  <video src={processedVideoUrl} controls autoPlay loop style={{ width: '100%', height: 'auto', maxHeight: '400px', objectFit: 'cover' }} />
                 </div>
               )}
 

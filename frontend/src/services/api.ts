@@ -112,11 +112,10 @@ export const aiApi = {
   /** Thermal Analyze: POST /api/ai/thermal-analyze (image) */
   thermalAnalyze: (formData: FormData) =>
     api.post('/api/ai/thermal-analyze', formData, { timeout: 120000 }),  // 120s for image
-  /** Thermal Analyze Video: POST /api/ai/thermal-analyze (video) — long timeout */
+  /** Thermal Analyze Video: POST /api/ai/thermal-analyze (video) — returns video_id for streaming */
   thermalAnalyzeVideo: (formData: FormData) =>
     api.post('/api/ai/thermal-analyze', formData, {
-      responseType: 'blob',
-      timeout: 600000,  // 10 minutes for video processing
+      timeout: 60000,  // just uploading the file — should be fast
     }),
 }
 

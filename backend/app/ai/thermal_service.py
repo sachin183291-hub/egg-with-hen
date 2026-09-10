@@ -656,3 +656,101 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
             out.release()
         LATEST_STREAM_RECORD["video_path"]  = out_video_path
         LATEST_STREAM_RECORD["final_count"] = len(unique_hen_ids)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Live stream from an uploaded video file (sync generator for StreamingResponse)
+# ─────────────────────────────────────────────────────────────────────────────
+def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: float = 40.0):
+    """
+    Open a pre-uploaded video file, run YOLO + BoT-SORT frame-by-frame
+    and yield MJPEG frames with the live hen count overlaid.
+    The frontend displays this as a live <img> stream.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(placeholder, "Cannot open video", (80, 240),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2)
+        _, buf = cv2.imencode(".jpg", placeholder)
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        return
+
+    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
+
+    # Downscale to 640px for speed
+    MAX_WIDTH = 640
+    scale = 1.0
+    if width > MAX_WIDTH:
+        scale = MAX_WIDTH / width
+        width  = int(width * scale)
+        height = int(height * scale)
+
+    # Skip frames — process at max 5 FPS
+    frame_skip = max(1, int(fps / 5))
+
+    # Pre-compute zone
+    zone_top    = int(height * 0.3)
+    zone_bottom = int(height * 0.7)
+
+    model = get_tracking_model()
+    unique_hen_ids: set = set()
+    frame_idx = 0
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_idx += 1
+            if frame_idx % frame_skip != 0:
+                continue
+
+            if scale != 1.0:
+                frame = cv2.resize(frame, (width, height))
+
+            results = model.track(frame, persist=True, tracker="botsort.yaml",
+                                  verbose=False, imgsz=320)
+            annotated = results[0].plot() if len(results) > 0 else frame.copy()
+
+            # Draw counting zone
+            cv2.line(annotated, (0, zone_top),    (width, zone_top),    (255, 0, 0), 2)
+            cv2.line(annotated, (0, zone_bottom),  (width, zone_bottom),  (255, 0, 0), 2)
+
+            current_visible = 0
+            if len(results) > 0 and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    cls_id = int(box.cls[0].item())
+                    raw_name = results[0].names.get(cls_id, "unknown").lower()
+                    if "hen" not in raw_name and "bird" not in raw_name:
+                        continue
+                    if box.id is not None:
+                        tid = int(box.id[0].item())
+                        current_visible += 1
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        cy = (y1 + y2) / 2
+                        if zone_top <= cy <= zone_bottom:
+                            unique_hen_ids.add(tid)
+
+            total_unique = len(unique_hen_ids)
+
+            # Count overlay
+            cv2.rectangle(annotated, (5, 5), (440, 38), (0, 0, 0), -1)
+            cv2.putText(annotated,
+                        f"Total Unique Hens: {total_unique}  |  Visible: {current_visible}",
+                        (9, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+            _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+
+    finally:
+        cap.release()
+        # Clean up uploaded temp file
+        try:
+            import os
+            os.remove(video_path)
+        except Exception:
+            pass

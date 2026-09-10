@@ -533,18 +533,14 @@ async def thermal_analyze(
         from fastapi.concurrency import run_in_threadpool
         
         if is_video:
-            result = await run_in_threadpool(process_thermal_video, image_bytes, min_temp, max_temp)
-            # We return the video file directly, but pass the count in headers
-            headers = {
-                "X-Hen-Count": str(result["hen_count"]),
-                "Access-Control-Expose-Headers": "X-Hen-Count"
-            }
-            return FileResponse(
-                path=result["video_path"], 
-                media_type="video/mp4", 
-                filename="thermal_output.mp4",
-                headers=headers
-            )
+            import tempfile
+            import os
+            # Save uploaded video to temp file
+            tmp_in = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4", prefix="upload_")
+            tmp_in.write(image_bytes)
+            tmp_in.flush()
+            tmp_in.close()
+            return {"success": True, "video_id": os.path.basename(tmp_in.name), "is_video": True}
         else:
             result = await run_in_threadpool(process_thermal_image, image_bytes, min_temp, max_temp)
             return result
@@ -553,6 +549,26 @@ async def thermal_analyze(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error processing thermal media: {str(exc)}")
+
+@router.get("/stream-uploaded-video")
+async def stream_uploaded_video_endpoint(video_id: str):
+    import os
+    import tempfile
+    from fastapi.responses import StreamingResponse
+    from app.ai.thermal_service import stream_uploaded_video
+
+    # Safely construct path in temp directory
+    safe_filename = os.path.basename(video_id)
+    file_path = os.path.join(tempfile.gettempdir(), safe_filename)
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Uploaded video not found.")
+        
+    stream = stream_uploaded_video(file_path)
+    return StreamingResponse(
+        stream,
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 @router.get("/drone-stream")
 async def drone_stream(ip: str):
