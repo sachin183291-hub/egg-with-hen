@@ -10,12 +10,7 @@ from app.ai.yolo_service import load_model
 from ultralytics import YOLO
 
 _tracking_model = None
-_world_model_classes = [
-    "white hen", "white chicken", "chicken", "hen",
-    "chicken head", "hen head", "chicken comb",
-    "chicken back", "bird back", "chicken tail",
-    "poultry in cage", "white bird"
-]  # YOLOWorld custom classes for omni-angle detection
+_world_model_classes = ["hen", "chicken", "poultry", "bird"]  # Keep it simple and robust for YOLOWorld
 
 def get_tracking_model():
     """
@@ -755,9 +750,9 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             if frame_idx % frame_skip == 0 or frame_idx == 1:
                 # bytetrack.yaml is massively faster than botsort.yaml on CPU
                 # conf=0.10 to help detect white hens that blend in
-                # Run tracker with agnostic NMS to merge overlapping boxes from our various synonyms
+                # Run tracker
                 results = tracking_model.track(frame, persist=True, tracker="bytetrack.yaml",
-                                               verbose=False, imgsz=416, conf=0.10, agnostic_nms=True)
+                                               verbose=False, imgsz=416, conf=0.05)
                 
                 last_boxes_data = []
                 current_visible = 0
@@ -867,9 +862,9 @@ async def generate_uploaded_video_stream(input_path: str):
                 continue
                 
             try:
-                # Run AI (this takes time, but won't block the video stream). Use agnostic NMS to prevent duplicates.
+                # Run AI (this takes time, but won't block the video stream)
                 results = tracking_model.track(frame_for_ai, persist=True, tracker="bytetrack.yaml",
-                                               verbose=False, imgsz=416, conf=0.05, agnostic_nms=True)
+                                               verbose=False, imgsz=416, conf=0.05)
                 new_boxes = []
                 current_vis = 0
                 
