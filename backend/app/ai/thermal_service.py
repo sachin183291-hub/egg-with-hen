@@ -825,6 +825,8 @@ async def generate_uploaded_video_stream(input_path: str):
     import threading
     import queue
     import numpy as np
+    import time
+    import traceback
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -864,36 +866,41 @@ async def generate_uploaded_video_stream(input_path: str):
             except queue.Empty:
                 continue
                 
-            # Run AI (this takes time, but won't block the video stream). Use agnostic NMS to prevent duplicates.
-            results = tracking_model.track(frame_for_ai, persist=True, tracker="bytetrack.yaml",
-                                           verbose=False, imgsz=416, conf=0.05, agnostic_nms=True)
-            new_boxes = []
-            current_vis = 0
-            
-            if results and results[0].boxes is not None:
-                for box in results[0].boxes:
-                    cls_id   = int(box.cls[0].item())
-                    raw_name = results[0].names.get(cls_id, "").lower()
-                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
-                        continue
-                    
-                    current_vis += 1
-                    if box.id is not None:
-                        unique_ids.add(int(box.id[0].item()))
+            try:
+                # Run AI (this takes time, but won't block the video stream). Use agnostic NMS to prevent duplicates.
+                results = tracking_model.track(frame_for_ai, persist=True, tracker="bytetrack.yaml",
+                                               verbose=False, imgsz=416, conf=0.05, agnostic_nms=True)
+                new_boxes = []
+                current_vis = 0
+                
+                if results and results[0].boxes is not None:
+                    for box in results[0].boxes:
+                        cls_id   = int(box.cls[0].item())
+                        raw_name = results[0].names.get(cls_id, "").lower()
+                        if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                            continue
                         
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    conf = float(box.conf[0].item())
-                    new_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
-            
-            current_boxes = new_boxes
-            if current_vis > max_visible:
-                max_visible = current_vis
+                        current_vis += 1
+                        if box.id is not None:
+                            unique_ids.add(int(box.id[0].item()))
+                            
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        conf = float(box.conf[0].item())
+                        new_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
+                
+                current_boxes = new_boxes
+                if current_vis > max_visible:
+                    max_visible = current_vis
+            except Exception as e:
+                print(f"[AI Thread Error]: {e}")
+                traceback.print_exc()
 
     # Start the background AI worker
     threading.Thread(target=ai_worker, daemon=True).start()
 
     try:
         while True:
+            start_time = time.time()
             ret, frame = cap.read()
             if not ret:
                 break
@@ -929,11 +936,16 @@ async def generate_uploaded_video_stream(input_path: str):
             cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            total_unique = max(len(unique_ids), max_visible)
+            STREAM_COUNTS[input_path] = total_unique
+            
+            # Sleep precisely the remaining time of the frame to enforce flawless real-time playback speed
+            elapsed = time.time() - start_time
+            sleep_time = max(0.001, (1.0 / fps) - elapsed)
+            await asyncio.sleep(sleep_time)
+            
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
             
-            # Sleep exactly the duration of one frame to enforce flawless real-time playback speed
-            await asyncio.sleep(1.0 / fps)
-
         # Video Finished: Send a final frame with "FINISHED" text
         final_frame = np.zeros((height, width, 3), dtype=np.uint8)
         final_text = f"FINISHED! Final Count: {total_unique}"
