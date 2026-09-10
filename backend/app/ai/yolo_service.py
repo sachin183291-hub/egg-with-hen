@@ -32,10 +32,15 @@ def load_model():
             has_hen = any("hen" in name.lower() or "bird" in name.lower() or "chicken" in name.lower() for name in model.names.values())
             
             if not has_tray or not has_hen:
-                print("Custom model lacks 'tray' or 'hen' class. Loading YOLO-World for trays and hens.")
-                tray_model_path = FALLBACK_MODEL_PATH if os.path.exists(FALLBACK_MODEL_PATH) else "yolov8s-worldv2.pt"
-                tray_model = YOLOWorld(tray_model_path)
-                tray_model.set_classes(["egg tray", "hen"])
+                if os.environ.get("RENDER") == "true":
+                    print("Running on Render. Skipping YOLO-World fallback due to memory limits.")
+                    tray_model = None
+                else:
+                    print("Custom model lacks 'tray' or 'hen' class. Loading YOLO-World for trays and hens.")
+                    tray_model_path = FALLBACK_MODEL_PATH if os.path.exists(FALLBACK_MODEL_PATH) else "yolov8s-worldv2.pt"
+                    tray_model = YOLOWorld(tray_model_path)
+                    tray_model.set_classes(["egg tray", "hen"])
+                
                 
         except Exception as e:
             print(f"Error loading model: {e}")
