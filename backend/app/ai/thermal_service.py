@@ -694,11 +694,11 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
 def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                       min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     """
-    Extreme-fast background video processing (Under 2 mins):
-    - cap.grab() to skip decoding ignored frames
-    - 2 FPS AI processing target
-    - ByteTrack instead of BoT-SORT (removes heavy CPU ReID model)
-    - 320px max width for fast video encoding
+    Fast processing with smooth playback:
+    - Reads and writes ALL frames for original 25 FPS smooth playback.
+    - Runs YOLOWorld AI at 3 FPS to save CPU time.
+    - Draws cached boxes on intermediate frames.
+    - Uses ByteTrack (no CPU ReID) for massive speedup over BoT-SORT.
     """
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -717,12 +717,12 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Process 5 frames per second (tracker needs smooth motion to assign IDs)
-    TARGET_AI_FPS = 5
+    # Process 3 frames per second (fast enough for drone, massively saves CPU)
+    TARGET_AI_FPS = 3
     frame_skip = max(1, int(fps / TARGET_AI_FPS))
 
-    # Output video matches the skipped framerate
-    OUT_FPS = fps / frame_skip
+    # Output video matches original smooth framerate (e.g., 25 FPS)
+    OUT_FPS = fps
     out_path = input_path.replace(".mp4", "_result.mp4")
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
     out      = cv2.VideoWriter(out_path, fourcc, OUT_FPS, (width, height))
@@ -733,40 +733,54 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     unique_ids: set = set()
     max_visible = 0
     frame_idx = 0
+    last_boxes_data = []
 
     try:
         while True:
-            # Jump exactly to the next target frame (instant O(1) skip on most codecs)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret:
                 break
             
-            # Increment by frame skip for the next loop iteration
-            frame_idx += frame_skip
+            frame_idx += 1
 
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # Use 416px for better accuracy
-            results = tracking_model.track(frame, persist=True, tracker="botsort.yaml",
-                                           verbose=False, imgsz=416, conf=0.15)
-            annotated = results[0].plot() if results else frame.copy()
+            # Run AI only every N frames
+            if frame_idx % frame_skip == 0 or frame_idx == 1:
+                # bytetrack.yaml is massively faster than botsort.yaml on CPU
+                # conf=0.10 to help detect white hens that blend in
+                results = tracking_model.track(frame, persist=True, tracker="bytetrack.yaml",
+                                               verbose=False, imgsz=416, conf=0.10)
+                
+                last_boxes_data = []
+                current_visible = 0
+                
+                if results and results[0].boxes is not None:
+                    for box in results[0].boxes:
+                        cls_id   = int(box.cls[0].item())
+                        raw_name = results[0].names.get(cls_id, "").lower()
+                        if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                            continue
+                        
+                        current_visible += 1
+                        if box.id is not None:
+                            unique_ids.add(int(box.id[0].item()))
+                            
+                        # Save box for drawing on intermediate frames
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        conf = float(box.conf[0].item())
+                        last_boxes_data.append((int(x1), int(y1), int(x2), int(y2), conf))
 
-            current_visible = 0
-            if results and results[0].boxes is not None:
-                for box in results[0].boxes:
-                    cls_id   = int(box.cls[0].item())
-                    raw_name = results[0].names.get(cls_id, "").lower()
-                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
-                        continue
-                    
-                    current_visible += 1
-                    if box.id is not None:
-                        unique_ids.add(int(box.id[0].item()))
+                if current_visible > max_visible:
+                    max_visible = current_visible
 
-            if current_visible > max_visible:
-                max_visible = current_visible
+            # Always draw boxes (either fresh or cached) to make playback perfectly smooth
+            annotated = frame.copy()
+            for x1, y1, x2, y2, conf in last_boxes_data:
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated, f"Hen", (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
             # Fallback: if tracker fails to assign IDs, at least show max visible hens
             total_unique = max(len(unique_ids), max_visible)
@@ -778,8 +792,10 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
 
             out.write(annotated)
 
-            progress = min(99, int(frame_idx / total_frames * 100))
-            jobs_dict[job_id]["progress"] = progress
+            # Update progress every 5 frames
+            if frame_idx % 5 == 0:
+                progress = min(99, int(frame_idx / total_frames * 100))
+                jobs_dict[job_id]["progress"] = progress
 
     finally:
         cap.release()
@@ -790,4 +806,4 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             pass
 
     jobs_dict[job_id]["progress"] = 100
-    return {"success": True, "hen_count": len(unique_ids), "video_path": out_path}
+    return {"success": True, "hen_count": total_unique, "video_path": out_path}
