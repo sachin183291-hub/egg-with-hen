@@ -464,20 +464,33 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False)
         annotated_frame = results[0].plot() if len(results) > 0 else frame.copy()
 
+        # Define virtual counting zone (middle 40% of the screen)
+        zone_top = int(height * 0.3)
+        zone_bottom = int(height * 0.7)
+        
+        # Draw the virtual counting zone lines
+        cv2.line(annotated_frame, (0, zone_top), (width, zone_top), (255, 0, 0), 2)
+        cv2.line(annotated_frame, (0, zone_bottom), (width, zone_bottom), (255, 0, 0), 2)
+
         current_visible = 0
         if len(results) > 0 and results[0].boxes is not None:
             for box in results[0].boxes:
                 cls_id = int(box.cls[0].item())
                 raw_class_name = results[0].names.get(cls_id, "unknown").lower()
                 
-                # Only count 'hen' class (or if standard YOLO, class 14 is bird, but custom model has 'hen')
+                # Only count 'hen' class (or if standard YOLO, class 14 is bird)
                 if "hen" not in raw_class_name and "bird" not in raw_class_name:
                     continue
 
                 if box.id is not None:
                     track_id = int(box.id[0].item())
-                    unique_hen_ids.add(track_id)
                     current_visible += 1
+                    
+                    # Virtual counting zone: Only count if the hen's center is inside the zone
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    cy = (y1 + y2) / 2
+                    if zone_top <= cy <= zone_bottom:
+                        unique_hen_ids.add(track_id)
 
         total_unique = len(unique_hen_ids)
 
@@ -574,6 +587,13 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
             results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False)
             annotated = results[0].plot() if len(results) > 0 else frame.copy()
 
+            # Define virtual counting zone
+            zone_top = int(height * 0.3)
+            zone_bottom = int(height * 0.7)
+            
+            cv2.line(annotated, (0, zone_top), (width, zone_top), (255, 0, 0), 2)
+            cv2.line(annotated, (0, zone_bottom), (width, zone_bottom), (255, 0, 0), 2)
+
             current_visible = 0
             if len(results) > 0 and results[0].boxes is not None:
                 for box in results[0].boxes:
@@ -585,8 +605,13 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
 
                     if box.id is not None:
                         track_id = int(box.id[0].item())
-                        unique_hen_ids.add(track_id)
                         current_visible += 1
+                        
+                        # Virtual counting zone check
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        cy = (y1 + y2) / 2
+                        if zone_top <= cy <= zone_bottom:
+                            unique_hen_ids.add(track_id)
 
             total_unique = len(unique_hen_ids)
 
