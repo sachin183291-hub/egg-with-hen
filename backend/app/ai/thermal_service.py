@@ -435,12 +435,26 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
+    # ── CPU SPEED OPTIMIZATION 1: DOWNSCALE ─────────────────────────────────
+    # Massive videos (4K) crash or timeout CPUs. Scale down to 800px max width.
+    MAX_WIDTH = 800
+    scale = 1.0
+    if width > MAX_WIDTH:
+        scale = MAX_WIDTH / width
+        width = int(width * scale)
+        height = int(height * scale)
+
+    # ── CPU SPEED OPTIMIZATION 2: SKIP FRAMES ───────────────────────────────
+    # Track at max 15 FPS to prevent 10-minute timeouts. BoT-SORT can handle it.
+    frame_skip = max(1, int(fps / 15))
+    out_fps = fps / frame_skip
+
     out: cv2.VideoWriter | None = None
     final_output = output_path_mp4
 
     for codec_str, out_path in [("mp4v", output_path_mp4), ("MJPG", output_path_avi), ("DIVX", output_path_avi)]:
         fourcc    = cv2.VideoWriter_fourcc(*codec_str)
-        candidate = cv2.VideoWriter(out_path, fourcc, fps, (width, height))
+        candidate = cv2.VideoWriter(out_path, fourcc, out_fps, (width, height))
         if candidate.isOpened():
             out          = candidate
             final_output = out_path
@@ -459,6 +473,13 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         ret, frame = cap.read()
         if not ret:
             break
+            
+        frame_idx += 1
+        if frame_idx % frame_skip != 0:
+            continue
+            
+        if scale != 1.0:
+            frame = cv2.resize(frame, (width, height))
 
         # Run tracking using BoT-SORT + Re-ID (built into Ultralytics YOLO)
         results = model.track(frame, persist=True, tracker="botsort.yaml", verbose=False)
