@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Thermometer, UploadCloud, Activity, Camera, RefreshCw, Video } from 'lucide-react'
 import { aiApi } from '../services/api'
 
@@ -16,6 +16,7 @@ export default function ThermalCameraPage() {
   const [videoJobId, setVideoJobId] = useState<string | null>(null)
   const [processingProgress, setProcessingProgress] = useState(0)
   const [mjpegStreamUrl, setMjpegStreamUrl] = useState<string | null>(null)
+  const [tempStreamPath, setTempStreamPath] = useState<string | null>(null)
 
   // Live Stream State
   const [activeTab, setActiveTab] = useState<'upload' | 'live'>('upload')
@@ -40,14 +41,33 @@ export default function ThermalCameraPage() {
           setIsAnalyzing(false)
         } else if (job.status === 'error') {
           clearInterval(interval)
-          setError(`Processing failed: ${job.error}`)
+          setError(job.error || 'Failed to process video')
           setIsAnalyzing(false)
         }
-      } catch {
-        // ignore poll errors, will retry
+      } catch (err) {
+        console.error("Polling error", err)
       }
-    }, 2000)
+    }, 1000)
   }
+
+  // Poll for live stream count
+  useEffect(() => {
+    let interval: NodeJS.Timeout
+    if (tempStreamPath && mjpegStreamUrl) {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_URL}/api/ai/stream-uploaded-count?path=${encodeURIComponent(tempStreamPath)}`)
+          const data = await res.json()
+          setResult({ is_video: true, hen_count: data.count })
+        } catch (e) {
+          console.error("Failed to fetch live count:", e)
+        }
+      }, 1000)
+    }
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [tempStreamPath, mjpegStreamUrl, API_URL])
 
 
   const connectLiveStream = () => {
@@ -102,8 +122,9 @@ export default function ThermalCameraPage() {
              const res = await fetch(`${API_URL}/api/ai/upload-temp-video`, { method: 'POST', body: formData })
              const data = await res.json()
              if (data.path) {
+                 setTempStreamPath(data.path)
                  setMjpegStreamUrl(`${API_URL}/api/ai/stream-uploaded-video?path=${encodeURIComponent(data.path)}`)
-                 setResult({ is_video: true, hen_count: "Counting..." }) // Fake result to hide the "Analyze" button
+                 setResult({ is_video: true, hen_count: "0" }) // Fake result to hide the "Analyze" button
              }
          } catch(e) {
              setError("Failed to start automatic video stream.")
@@ -168,6 +189,7 @@ export default function ThermalCameraPage() {
     setVideoStreamUrl(null)
     setVideoJobId(null)
     setMjpegStreamUrl(null)
+    setTempStreamPath(null)
     setProcessingProgress(0)
     setError(null)
     setIsAnalyzing(false)
@@ -364,9 +386,9 @@ export default function ThermalCameraPage() {
 
           {mjpegStreamUrl && (
             <div style={{ textAlign: 'center', padding: '40px 20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <Activity size={48} color="#ef4444" style={{ margin: '0 auto' }} />
-              <h3 style={{ fontSize: '1.2rem', color: 'var(--text-muted)' }}>Counting automatically in real-time...</h3>
-              <p style={{ color: 'var(--text-muted)' }}>See the video view on the left for the live count.</p>
+              <div className="pulse-ring" style={{ width: '60px', height: '60px', background: '#22c55e', borderRadius: '50%', margin: '0 auto' }}></div>
+              <h3 style={{ fontSize: '1.4rem', color: '#22c55e', fontWeight: 'bold' }}>Live Hen Count: {result?.hen_count || 0}</h3>
+              <p style={{ color: 'var(--text-muted)' }}>Counting automatically in real-time. See the video view on the left.</p>
             </div>
           )}
 
