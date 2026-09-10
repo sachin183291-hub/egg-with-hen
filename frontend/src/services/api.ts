@@ -7,7 +7,7 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 export const api = axios.create({
   baseURL: API_URL,
-  timeout: 30000,  // 30s default — enough for image analysis
+  timeout: 600000,  // 10 minutes default — enough for video analysis
   headers: { 'Content-Type': 'application/json' },
 })
 
