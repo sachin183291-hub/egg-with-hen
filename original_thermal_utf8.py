@@ -1,4 +1,4 @@
-import cv2
+﻿import cv2
 import numpy as np
 import base64
 import os
@@ -10,28 +10,37 @@ from app.ai.yolo_service import load_model
 from ultralytics import YOLO
 
 _tracking_model = None
-_world_model_classes = ["hen", "chicken", "poultry", "bird"]  # Keep it simple and robust for YOLOWorld
+_world_model_classes = ["hen", "chicken", "poultry bird", "hen head", "chicken head"]  # YOLOWorld custom classes
 
 def get_tracking_model():
     """
-    Load standard yolov8n.pt. In a top-down battery cage, ANY distinctly tracked object
-    is a hen, even if the model misclassifies it as a cat or vase due to the angle.
+    Use YOLOWorld model for hen detection ΓÇö it can be told exactly to find 'hen'/'chicken'.
+    Falls back to yolov8n COCO (class 14 = bird) if world model not available.
     """
     global _tracking_model
     if _tracking_model is None:
+        # Try YOLOWorld first (already in backend folder)
+        world_path = os.path.join(os.path.dirname(__file__), "../../yolov8s-world.pt")
+        world_path = os.path.abspath(world_path)
         try:
-            _tracking_model = YOLO("yolov8n.pt")
-            print("[Tracking] Loaded yolov8n for class-agnostic tracking.")
+            if os.path.exists(world_path):
+                _tracking_model = YOLO(world_path)
+                _tracking_model.set_classes(_world_model_classes)
+                print(f"[Tracking] Loaded YOLOWorld model ΓÇö classes: {_world_model_classes}")
+            else:
+                raise FileNotFoundError("YOLOWorld not found")
         except Exception as e:
-            print(f"[Tracking] Error loading YOLO: {e}")
+            print(f"[Tracking] YOLOWorld unavailable ({e}), falling back to yolov8n COCO")
+            _tracking_model = YOLO("yolov8n.pt")
+            print("[Tracking] Loaded yolov8n ΓÇö COCO class 14 (bird) covers hens")
     return _tracking_model
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Core detection — fast OpenCV-based thermal blob detection (NO YOLO needed)
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+# Core detection ΓÇö fast OpenCV-based thermal blob detection (NO YOLO needed)
 # Works on thermal colourmap video/images where hens appear as red/orange/white
 # heat blobs. ~50x faster than YOLO per-frame.
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 def detect_thermal_hotspots(
     image: np.ndarray,
     min_temp: float = 20.0,
@@ -41,13 +50,13 @@ def detect_thermal_hotspots(
     h_img, w_img = image.shape[:2]
     annotated = image.copy()
 
-    # ── 1. Downscale for faster processing (50% → 4× faster) ────────────────
+    # ΓöÇΓöÇ 1. Downscale for faster processing (50% ΓåÆ 4├ù faster) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     SCALE = 0.5
     small = cv2.resize(image, (int(w_img * SCALE), int(h_img * SCALE)))
     sh, sw = small.shape[:2]
     hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
 
-    # ── 2. Thermal colour mask ────────────────────────────────────────────────
+    # ΓöÇΓöÇ 2. Thermal colour mask ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     hot_mask = cv2.bitwise_or(
         cv2.bitwise_or(
             cv2.bitwise_or(
@@ -65,7 +74,7 @@ def detect_thermal_hotspots(
     hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
     hot_mask = cv2.morphologyEx(hot_mask, cv2.MORPH_OPEN,  np.ones((7, 7), np.uint8))  # bigger kernel removes tiny noise
 
-    # ── Exclude the thermal color-scale bar on right edge (thin vertical strip) ──
+    # ΓöÇΓöÇ Exclude the thermal color-scale bar on right edge (thin vertical strip) ΓöÇΓöÇ
     # Most thermal cameras overlay a 5-15% wide color bar on the right side.
     # Use 85% cutoff to safely exclude wider scale bars.
     scale_bar_x = int(sw * 0.85)
@@ -74,11 +83,11 @@ def detect_thermal_hotspots(
     hot_mask[:int(sh * 0.03), :] = 0
     hot_mask[int(sh * 0.97):, :] = 0
 
-    # ── 3. Find contours ──────────────────────────────────────────────────────
+    # ΓöÇΓöÇ 3. Find contours ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     contours, _ = cv2.findContours(hot_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     frame_area = sh * sw
 
-    # MIN_AREA: a hen at typical drone altitude covers at least 200px² on 50%-scaled frame
+    # MIN_AREA: a hen at typical drone altitude covers at least 200px┬▓ on 50%-scaled frame
     # MAX_AREA: single blob shouldn't be more than 25% of frame (that's a whole flock merged)
     MIN_AREA = max(200, int(frame_area * 0.0008))  # ~0.08% of frame minimum
     MAX_AREA = int(frame_area * 0.25)
@@ -107,11 +116,11 @@ def detect_thermal_hotspots(
         if ms < 50 and mv > 200:
             return 40.0   # white-hot core
         if mh >= 158 or mh <= 5:
-            return 36.0 + min(1.0, mv / 255.0) * 5.0   # red → 36-41°C
+            return 36.0 + min(1.0, mv / 255.0) * 5.0   # red ΓåÆ 36-41┬░C
         if mh <= 28:
-            return 28.0 + (1.0 - (mh - 5) / 23.0) * 8.0  # orange → 28-36°C
+            return 28.0 + (1.0 - (mh - 5) / 23.0) * 8.0  # orange ΓåÆ 28-36┬░C
         if mh <= 45:
-            return 20.0 + (1.0 - (mh - 28) / 17.0) * 8.0  # yellow/greenish → 20-28°C
+            return 20.0 + (1.0 - (mh - 28) / 17.0) * 8.0  # yellow/greenish ΓåÆ 20-28┬░C
         return 0.0  # green/blue = cold background
 
     def draw_box(img, hx, hy, hw, hh, label, temp):
@@ -170,7 +179,7 @@ def detect_thermal_hotspots(
 
         used_boxes.append((x1, y1, x2, y2))
 
-        # ── Local Maxima (Peak Finding) to count hens in clustered blobs ──
+        # ΓöÇΓöÇ Local Maxima (Peak Finding) to count hens in clustered blobs ΓöÇΓöÇ
         # Extract V-channel for brightness/heat
         roi_v = roi_hsv[:, :, 2]
         roi_blurred = cv2.GaussianBlur(roi_v, (5, 5), 0)
@@ -183,7 +192,7 @@ def detect_thermal_hotspots(
         peaks_mask = (roi_blurred == local_max) & (roi_mask > 0) & (roi_blurred > 50)
         
         num_peaks, _, stats, peak_centroids = cv2.connectedComponentsWithStats(np.uint8(peaks_mask) * 255)
-        # Filter out tiny noise components — require at least 4 pixels to count as a real heat core
+        # Filter out tiny noise components ΓÇö require at least 4 pixels to count as a real heat core
         # This prevents hot-pixel noise from inflating the count
         real_peaks = sum(1 for i in range(1, num_peaks) if stats[i, cv2.CC_STAT_AREA] >= 4)
         # Cap peaks per blob: no single blob should represent >8 hens (unrealistic for drone altitude)
@@ -226,7 +235,7 @@ def detect_thermal_hotspots(
     hen_count = len(valid_hens)
     hens_data: List[Dict] = []
 
-    # ── 4. Update tracker (for video) or draw directly (for single image) ────
+    # ΓöÇΓöÇ 4. Update tracker (for video) or draw directly (for single image) ΓöÇΓöÇΓöÇΓöÇ
     if tracker is not None:
         objects = tracker.update(rects)
         # Use currently visible objects count (caller tracks peak across frames)
@@ -262,7 +271,7 @@ def detect_thermal_hotspots(
             hens_data.append({"hen_number": hen_id, "temperature": round(hen["temperature"], 1)})
         summary = f"Hens: {hen_count}  ({min_temp:.0f}C-{max_temp:.0f}C)"
 
-    # ── 5. Summary overlay ────────────────────────────────────────────────────
+    # ΓöÇΓöÇ 5. Summary overlay ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     s_scale = max(0.6, w_img * 0.0012)
     (sw2, _), _ = cv2.getTextSize(summary, cv2.FONT_HERSHEY_SIMPLEX, s_scale, 2)
     cv2.rectangle(annotated, (5, 5), (sw2 + 16, 36), (0, 0, 0), -1)
@@ -271,17 +280,17 @@ def detect_thermal_hotspots(
     return annotated, hen_count, hens_data
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     nparr = np.frombuffer(image_bytes, np.uint8)
     image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("Could not decode image bytes.")
 
-    # ── Step 1: Run OpenCV detection for bounding boxes + annotated image ─────
+    # ΓöÇΓöÇ Step 1: Run OpenCV detection for bounding boxes + annotated image ΓöÇΓöÇΓöÇΓöÇΓöÇ
     annotated, opencv_count, opencv_hens = detect_thermal_hotspots(image, min_temp, max_temp)
 
-    # ── Step 1.5: If OpenCV found no thermal heat blobs, fallback to YOLO ─────
+    # ΓöÇΓöÇ Step 1.5: If OpenCV found no thermal heat blobs, fallback to YOLO ΓöÇΓöÇΓöÇΓöÇΓöÇ
     yolo_used = False
     if opencv_count == 0:
         try:
@@ -312,7 +321,7 @@ def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: 
     detection_method = "YOLO AI detection" if yolo_used else "OpenCV thermal blob detection"
     notes = ""
 
-    # ── Step 2: Update count overlay on annotated image ───────────────────────
+    # ΓöÇΓöÇ Step 2: Update count overlay on annotated image ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     summary = f"Hens: {hen_count}  [{detection_method}]"
     s_scale = max(0.5, image.shape[1] * 0.0010)
     (tw, _), _ = cv2.getTextSize(summary, cv2.FONT_HERSHEY_SIMPLEX, s_scale, 2)
@@ -334,14 +343,14 @@ def process_thermal_image(image_bytes: bytes, min_temp: float = 20.0, max_temp: 
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     """
     Accept raw video bytes (from the API upload), write to a temp file,
     process frame-by-frame using YOLO + BoT-SORT tracking for unique hen counting,
     and return the annotated output video path + count.
     """
-    # ── Write incoming bytes to a temp input file ────────────────────────────
+    # ΓöÇΓöÇ Write incoming bytes to a temp input file ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     suffix_in  = ".mp4"
     tmp_in     = tempfile.NamedTemporaryFile(delete=False, suffix=suffix_in)
     tmp_in.write(video_bytes)
@@ -349,7 +358,7 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
     tmp_in.close()
     input_path = tmp_in.name
 
-    # ── Prepare output path ──────────────────────────────────────────────────
+    # ΓöÇΓöÇ Prepare output path ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     tmp_out_mp4 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     tmp_out_mp4.close()
     output_path_mp4 = tmp_out_mp4.name
@@ -366,7 +375,7 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps    = cap.get(cv2.CAP_PROP_FPS) or 25.0
 
-    # ── CPU SPEED OPTIMIZATION 1: DOWNSCALE ─────────────────────────────────
+    # ΓöÇΓöÇ CPU SPEED OPTIMIZATION 1: DOWNSCALE ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     # Massive videos crash or timeout CPUs. Scale down to 640px max width.
     MAX_WIDTH = 640
     scale = 1.0
@@ -375,7 +384,7 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
         width = int(width * scale)
         height = int(height * scale)
 
-    # ── CPU SPEED OPTIMIZATION 2: SKIP FRAMES ───────────────────────────────
+    # ΓöÇΓöÇ CPU SPEED OPTIMIZATION 2: SKIP FRAMES ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     # Track at max 5 FPS to prevent 10-minute timeouts. BoT-SORT can handle it.
     frame_skip = max(1, int(fps / 5))
     out_fps = fps / frame_skip
@@ -467,7 +476,7 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
     except Exception:
         pass
 
-    # Convert AVI → MP4 via ffmpeg if needed
+    # Convert AVI ΓåÆ MP4 via ffmpeg if needed
     if final_output.endswith(".avi") and os.path.exists(final_output):
         try:
             import subprocess
@@ -489,9 +498,9 @@ def process_thermal_video(video_bytes: bytes, min_temp: float = 20.0, max_temp: 
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 # Global state for live drone stream recordings
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 LATEST_STREAM_RECORD: Dict[str, Any] = {
     "video_path":  None,
     "final_count": 0,
@@ -568,7 +577,7 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
 
             total_unique = len(unique_hen_ids)
 
-            # Count overlay — show total unique & current
+            # Count overlay ΓÇö show total unique & current
             cv2.rectangle(annotated, (5, 5), (420, 36), (0, 0, 0), -1)
             cv2.putText(annotated, f"Total Unique Hens: {total_unique} (now: {current_visible})",
                         (9, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
@@ -589,9 +598,9 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
         LATEST_STREAM_RECORD["final_count"] = len(unique_hen_ids)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 # Live stream from an uploaded video file (sync generator for StreamingResponse)
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: float = 40.0):
     """
     Open a pre-uploaded video file, run YOLO + BoT-SORT frame-by-frame
@@ -619,7 +628,7 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Process at max 10 FPS — smooth enough, fast enough
+    # Process at max 10 FPS ΓÇö smooth enough, fast enough
     frame_skip = max(1, int(fps / 10))
 
     model = get_tracking_model()
@@ -639,7 +648,7 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # Low confidence (0.15) — hens in cages are partially occluded
+            # Low confidence (0.15) ΓÇö hens in cages are partially occluded
             results = model.track(frame, persist=True, tracker="botsort.yaml",
                                   verbose=False, imgsz=416, conf=0.15)
             annotated = results[0].plot() if len(results) > 0 else frame.copy()
@@ -659,7 +668,7 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
 
             total_unique = len(unique_hen_ids)
 
-            # Count overlay — green text on black background
+            # Count overlay ΓÇö green text on black background
             label = f"Hens: {total_unique} unique  |  Visible now: {current_visible}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 16), (0, 0, 0), -1)
@@ -679,17 +688,17 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
             pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 # Background job: process full video, write annotated MP4, report progress
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                       min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     """
-    Background video processing:
-    - Reads and writes ALL frames for smooth playback.
-    - Runs fast OpenCV thermal blob detection. If no thermal blobs, uses YOLO.
-    - Frame skipping for massive speedup and robust approximate counting.
-    - Uses custom CentroidTracker for tracking.
+    Fast processing with smooth playback:
+    - Reads and writes ALL frames for original 25 FPS smooth playback.
+    - Runs YOLOWorld AI at 3 FPS to save CPU time.
+    - Draws cached boxes on intermediate frames.
+    - Uses ByteTrack (no CPU ReID) for massive speedup over BoT-SORT.
     """
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -708,23 +717,22 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Output video matches original smooth framerate
+    # Process 3 frames per second (fast enough for drone, massively saves CPU)
+    TARGET_AI_FPS = 3
+    frame_skip = max(1, int(fps / TARGET_AI_FPS))
+
+    # Output video matches original smooth framerate (e.g., 25 FPS)
     OUT_FPS = fps
     out_path = input_path.replace(".mp4", "_result.mp4")
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
     out      = cv2.VideoWriter(out_path, fourcc, OUT_FPS, (width, height))
 
+    # Use the highly accurate YOLOWorld model (cached)
     tracking_model = get_tracking_model()
-    
-    # Custom Centroid Tracker for accurate ID assignment (relaxed for skipped frames)
-    tracker = CentroidTracker(max_disappeared=30, max_distance=150)
 
     unique_ids: set = set()
+    max_visible = 0
     frame_idx = 0
-    frame_skip = max(1, int(fps / 5))  # Process at ~5 FPS for speed
-
-    # Cache for skipping frames
-    last_rects = []
     last_boxes_data = []
 
     try:
@@ -738,80 +746,45 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
+            # Run AI only every N frames
+            if frame_idx % frame_skip == 0 or frame_idx == 1:
+                # bytetrack.yaml is massively faster than botsort.yaml on CPU
+                # conf=0.10 to help detect white hens that blend in
+                results = tracking_model.track(frame, persist=True, tracker="bytetrack.yaml",
+                                               verbose=False, imgsz=416, conf=0.10)
+                
+                last_boxes_data = []
+                current_visible = 0
+                
+                if results and results[0].boxes is not None:
+                    for box in results[0].boxes:
+                        cls_id   = int(box.cls[0].item())
+                        raw_name = results[0].names.get(cls_id, "").lower()
+                        if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                            continue
+                        
+                        current_visible += 1
+                        if box.id is not None:
+                            unique_ids.add(int(box.id[0].item()))
+                            
+                        # Save box for drawing on intermediate frames
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        conf = float(box.conf[0].item())
+                        last_boxes_data.append((int(x1), int(y1), int(x2), int(y2), conf))
+
+                if current_visible > max_visible:
+                    max_visible = current_visible
+
+            # Always draw boxes (either fresh or cached) to make playback perfectly smooth
             annotated = frame.copy()
-            current_visible = 0
-            
-            if frame_idx % frame_skip == 1 or frame_skip == 1:
-                # 1. Try OpenCV Thermal Detection (Very Fast)
-                _, opencv_count, opencv_hens = detect_thermal_hotspots(frame, min_temp, max_temp)
-                
-                rects = []
-                boxes_data = []
-                
-                if opencv_count > 0:
-                    # It's a thermal video!
-                    for hen in opencv_hens:
-                        x1, y1 = hen["x"], hen["y"]
-                        x2, y2 = x1 + hen["w"], y1 + hen["h"]
-                        rects.append((x1, y1, x2, y2))
-                        boxes_data.append((x1, y1, x2, y2, 0.9)) # High confidence for thermal
-                else:
-                    # 2. Fallback to YOLO AI (Normal video)
-                    results = tracking_model.predict(frame, verbose=False, imgsz=320, conf=0.15)
-                    if results and results[0].boxes is not None:
-                        for box in results[0].boxes:
-                            cls_id = int(box.cls[0].item())
-                            raw_name = results[0].names.get(cls_id, "unknown").lower()
-                            
-                            if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry", "cat", "dog")):
-                                continue
-                                
-                            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                            
-                            # Filter out massive boxes (e.g., the entire cage)
-                            frame_area = width * height
-                            if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
-                                continue
-                                
-                            rects.append((x1, y1, x2, y2))
-                            boxes_data.append((x1, y1, x2, y2, float(box.conf[0].item())))
-                
-                last_rects = rects
-                last_boxes_data = boxes_data
-            else:
-                rects = last_rects
-                boxes_data = last_boxes_data
+            for x1, y1, x2, y2, conf in last_boxes_data:
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated, f"Hen", (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-            # Update custom reliable tracker on EVERY frame with the (potentially cached) boxes
-            # This keeps IDs consistent even if boxes don't shift.
-            objects = tracker.update(rects)
-            
-            for bx1, by1, bx2, by2, conf in boxes_data:
-                cx, cy = int((bx1+bx2)/2.0), int((by1+by2)/2.0)
-                best_id = None
-                best_dist = float('inf')
-                
-                for obj_id, (ocx, ocy) in objects.items():
-                    dist = math.sqrt((cx-ocx)**2 + (cy-ocy)**2)
-                    if dist < best_dist and dist < tracker.max_distance:
-                        best_dist = dist
-                        best_id = obj_id
-                
-                if best_id is not None:
-                    tid = best_id
-                    current_visible += 1
-                    unique_ids.add(tid)
-                    
-                    label_text = f"Hen #{tid}"
-                    color = (0, 255, 0)
-                    
-                    cv2.rectangle(annotated, (bx1, by1), (bx2, by2), color, 2)
-                    (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                    cv2.rectangle(annotated, (bx1, max(0, by1 - th - 8)), (bx1 + tw + 4, by1), color, -1)
-                    cv2.putText(annotated, label_text, (bx1 + 2, max(0, by1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-
-            total_unique = len(unique_ids)
-            label = f"Approximate Hens: {total_unique} (Visible: {current_visible})"
+            # Fallback: if tracker fails to assign IDs, at least show max visible hens
+            total_unique = max(len(unique_ids), max_visible)
+            label = f"Hens: {total_unique}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
             cv2.putText(annotated, label, (9, th + 12),
@@ -835,100 +808,17 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
     jobs_dict[job_id]["progress"] = 100
     return {"success": True, "hen_count": total_unique, "video_path": out_path}
 
-import math
-from collections import OrderedDict
-
-class CentroidTracker:
-    def __init__(self, max_disappeared=10, max_distance=80):
-        self.next_object_id = 1
-        self.objects = OrderedDict()
-        self.disappeared = OrderedDict()
-        self.max_disappeared = max_disappeared
-        self.max_distance = max_distance
-
-    def register(self, centroid):
-        self.objects[self.next_object_id] = centroid
-        self.disappeared[self.next_object_id] = 0
-        self.next_object_id += 1
-
-    def deregister(self, object_id):
-        del self.objects[object_id]
-        del self.disappeared[object_id]
-
-    def update(self, rects):
-        if len(rects) == 0:
-            for object_id in list(self.disappeared.keys()):
-                self.disappeared[object_id] += 1
-                if self.disappeared[object_id] > self.max_disappeared:
-                    self.deregister(object_id)
-            return self.objects
-
-        input_centroids = np.zeros((len(rects), 2), dtype="int")
-        for (i, (startX, startY, endX, endY)) in enumerate(rects):
-            cX = int((startX + endX) / 2.0)
-            cY = int((startY + endY) / 2.0)
-            input_centroids[i] = (cX, cY)
-
-        if len(self.objects) == 0:
-            for i in range(0, len(input_centroids)):
-                self.register(input_centroids[i])
-        else:
-            object_ids = list(self.objects.keys())
-            object_centroids = list(self.objects.values())
-
-            D = np.zeros((len(object_centroids), len(input_centroids)))
-            for i in range(len(object_centroids)):
-                for j in range(len(input_centroids)):
-                    dx = object_centroids[i][0] - input_centroids[j][0]
-                    dy = object_centroids[i][1] - input_centroids[j][1]
-                    D[i, j] = math.sqrt(dx*dx + dy*dy)
-
-            rows = D.min(axis=1).argsort()
-            cols = D.argmin(axis=1)[rows]
-
-            used_rows = set()
-            used_cols = set()
-
-            for (row, col) in zip(rows, cols):
-                if row in used_rows or col in used_cols:
-                    continue
-                if D[row, col] > self.max_distance:
-                    continue
-
-                object_id = object_ids[row]
-                self.objects[object_id] = input_centroids[col]
-                self.disappeared[object_id] = 0
-                used_rows.add(row)
-                used_cols.add(col)
-
-            unused_rows = set(range(0, D.shape[0])).difference(used_rows)
-            unused_cols = set(range(0, D.shape[1])).difference(used_cols)
-
-            for row in unused_rows:
-                object_id = object_ids[row]
-                self.disappeared[object_id] += 1
-                if self.disappeared[object_id] > self.max_disappeared:
-                    self.deregister(object_id)
-
-            for col in unused_cols:
-                self.register(input_centroids[col])
-
-        return self.objects
-
 STREAM_COUNTS = {}
 
 async def generate_uploaded_video_stream(input_path: str):
     """
     Generator that serves an uploaded video as a perfectly smooth MJPEG stream in real-time.
-    Runs fast OpenCV thermal detection or YOLO on skipped frames to ensure speed,
-    while drawing cached boxes to maintain playback framerate.
+    Uses a background thread for YOLOWorld AI to ensure the video never stutters.
     """
     import asyncio
-    import cv2
+    import threading
+    import queue
     import numpy as np
-    import math
-    import time
-    import os
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -946,141 +836,112 @@ async def generate_uploaded_video_stream(input_path: str):
         width = int(width * scale)
         height = int(height * scale)
 
-    tracking_model = get_tracking_model()
-    unique_ids: set = set()
-    
-    # Simple, highly reliable distance tracker (bypasses YOLO strict track_high_thresh limits)
-    tracker = CentroidTracker(max_disappeared=30, max_distance=150)
-    
-    frame_idx = 0
-    frame_skip = max(1, int(fps / 5))  # Process at ~5 FPS for speed
+    TARGET_AI_FPS = 5
+    frame_skip = max(1, int(fps / TARGET_AI_FPS))
 
-    last_rects = []
-    last_boxes_data = []
+    tracking_model = get_tracking_model()
+    
+    unique_ids: set = set()
+    max_visible = 0
+    frame_idx = 0
+    current_boxes = []
+    
+    # Use a background thread for AI so video never stops or lags
+    ai_thread_running = True
+    frame_queue = queue.Queue(maxsize=1)
+
+    def ai_worker():
+        nonlocal current_boxes, max_visible
+        while ai_thread_running:
+            try:
+                frame_for_ai = frame_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+                
+            # Run AI (this takes time, but won't block the video stream)
+            results = tracking_model.track(frame_for_ai, persist=True, tracker="bytetrack.yaml",
+                                           verbose=False, imgsz=416, conf=0.05)
+            new_boxes = []
+            current_vis = 0
+            
+            if results and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    cls_id   = int(box.cls[0].item())
+                    raw_name = results[0].names.get(cls_id, "").lower()
+                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry")):
+                        continue
+                    
+                    current_vis += 1
+                    if box.id is not None:
+                        unique_ids.add(int(box.id[0].item()))
+                        
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    conf = float(box.conf[0].item())
+                    new_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
+            
+            current_boxes = new_boxes
+            if current_vis > max_visible:
+                max_visible = current_vis
+
+    # Start the background AI worker
+    threading.Thread(target=ai_worker, daemon=True).start()
 
     try:
         while True:
-            start_time = time.time()
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            frame_idx += 1
                 
+            frame_idx += 1
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            annotated = frame.copy()
-            current_visible = 0
-            
-            if frame_idx % frame_skip == 1 or frame_skip == 1:
-                # 1. Try OpenCV Thermal Detection first
-                _, opencv_count, opencv_hens = detect_thermal_hotspots(frame, 20.0, 40.0)
-                
-                rects = []
-                boxes_data = []
-                
-                if opencv_count > 0:
-                    for hen in opencv_hens:
-                        x1, y1 = hen["x"], hen["y"]
-                        x2, y2 = x1 + hen["w"], y1 + hen["h"]
-                        rects.append((x1, y1, x2, y2))
-                        boxes_data.append((x1, y1, x2, y2, 0.9))
-                else:
-                    # 2. Fallback to YOLO
-                    results = tracking_model.predict(
-                        frame, 
-                        verbose=False, 
-                        imgsz=320, 
-                        conf=0.15
-                    )
-                    
-                    if len(results) > 0 and results[0].boxes is not None:
-                        for box in results[0].boxes:
-                            cls_id = int(box.cls[0].item())
-                            raw_name = results[0].names.get(cls_id, "unknown").lower()
-                            
-                            # Accept any plausible class since from top-down hens can be misclassified
-                            if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry", "cat", "dog")):
-                                continue
-                                
-                            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                            
-                            # Filter massive boxes
-                            frame_area = width * height
-                            if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
-                                continue
-                                
-                            rects.append((x1, y1, x2, y2))
-                            boxes_data.append((x1, y1, x2, y2, float(box.conf[0].item())))
-                
-                last_rects = rects
-                last_boxes_data = boxes_data
-            else:
-                rects = last_rects
-                boxes_data = last_boxes_data
-                    
-            # Update our custom reliable tracker
-            objects = tracker.update(rects)
-            
-            # Match IDs to the drawn boxes for smooth shifting
-            for bx1, by1, bx2, by2, conf in boxes_data:
-                cx, cy = int((bx1+bx2)/2.0), int((by1+by2)/2.0)
-                best_id = None
-                best_dist = float('inf')
-                
-                for obj_id, (ocx, ocy) in objects.items():
-                    dist = math.sqrt((cx-ocx)**2 + (cy-ocy)**2)
-                    if dist < best_dist and dist < tracker.max_distance:
-                        best_dist = dist
-                        best_id = obj_id
-                
-                if best_id is not None:
-                    tid = best_id
-                    current_visible += 1
-                    unique_ids.add(tid)
-                    
-                    label_text = f"Hen #{tid}"
-                    color = (0, 255, 0)  # Green
-                    
-                    # Draw perfectly shifting box on the head/body
-                    cv2.rectangle(annotated, (bx1, by1), (bx2, by2), color, 2)
-                    
-                    # Draw text label smoothly
-                    (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                    cv2.rectangle(annotated, (bx1, max(0, by1 - th - 8)), (bx1 + tw + 4, by1), color, -1)
-                    cv2.putText(annotated, label_text, (bx1 + 2, max(0, by1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            # Send frame to AI thread if it's ready
+            if frame_idx % frame_skip == 0 and frame_queue.empty():
+                frame_queue.put(frame.copy())
 
-            total_unique = len(unique_ids)
+            annotated = frame.copy()
+            # Draw instantly using the latest boxes from the AI thread
+            for x1, y1, x2, y2, conf in current_boxes:
+                label_text = f"hen {conf:.2f}"
+                color = (255, 255, 0)  # Cyan in BGR
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                
+                # Draw filled rectangle for text background
+                (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+                
+                # Draw text in black over the filled background
+                cv2.putText(annotated, label_text, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+
+            total_unique = max(len(unique_ids), max_visible)
             STREAM_COUNTS[input_path] = total_unique
             
-            label = f"Approx Live Hens: {total_unique}  (Visible: {current_visible})"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+            label = f"Hens: {total_unique}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
-            cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            
-            # Sleep precisely the remaining time of the frame to enforce flawless real-time playback speed
-            elapsed = time.time() - start_time
-            sleep_time = max(0.001, (1.0 / fps) - elapsed)
-            await asyncio.sleep(sleep_time)
-            
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
             
-        # Video Finished
+            # Sleep exactly the duration of one frame to enforce flawless real-time playback speed
+            await asyncio.sleep(1.0 / fps)
+
+        # Video Finished: Send a final frame with "FINISHED" text
         final_frame = np.zeros((height, width, 3), dtype=np.uint8)
         final_text = f"FINISHED! Final Count: {total_unique}"
-        cv2.putText(final_frame, final_text, (50, height//2), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
+        cv2.putText(final_frame, final_text, (50, height//2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
         _, buf = cv2.imencode(".jpg", final_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
         yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
+        
+        # Keep the final image on screen for a moment before disconnecting
         await asyncio.sleep(3.0)
 
     finally:
+        ai_thread_running = False
         cap.release()
         try:
-            if os.path.exists(input_path):
-                os.remove(input_path)
+            os.remove(input_path)
         except Exception:
             pass
-
