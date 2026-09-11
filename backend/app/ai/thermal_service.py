@@ -685,11 +685,10 @@ def stream_uploaded_video(video_path: str, min_temp: float = 20.0, max_temp: flo
 def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
                       min_temp: float = 20.0, max_temp: float = 40.0) -> Dict[str, Any]:
     """
-    Fast processing with smooth playback:
-    - Reads and writes ALL frames for original 25 FPS smooth playback.
-    - Runs YOLOWorld AI at 3 FPS to save CPU time.
-    - Draws cached boxes on intermediate frames.
-    - Uses ByteTrack (no CPU ReID) for massive speedup over BoT-SORT.
+    Background video processing:
+    - Reads and writes ALL frames for smooth playback.
+    - Runs YOLO AI on every frame with imgsz=320 for speed.
+    - Uses custom CentroidTracker for perfectly accurate counting and smooth shifting boxes.
     """
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -708,23 +707,20 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
         width  = int(width * scale)
         height = int(height * scale)
 
-    # Process 3 frames per second (fast enough for drone, massively saves CPU)
-    TARGET_AI_FPS = 3
-    frame_skip = max(1, int(fps / TARGET_AI_FPS))
-
-    # Output video matches original smooth framerate (e.g., 25 FPS)
+    # Output video matches original smooth framerate
     OUT_FPS = fps
     out_path = input_path.replace(".mp4", "_result.mp4")
     fourcc   = cv2.VideoWriter_fourcc(*"mp4v")
     out      = cv2.VideoWriter(out_path, fourcc, OUT_FPS, (width, height))
 
-    # Use the highly accurate YOLOWorld model (cached)
+    # Use the highly accurate YOLO model
     tracking_model = get_tracking_model()
+    
+    # Custom Centroid Tracker for accurate ID assignment and tracking
+    tracker = CentroidTracker(max_disappeared=10, max_distance=60)
 
     unique_ids: set = set()
-    max_visible = 0
     frame_idx = 0
-    last_boxes_data = []
 
     try:
         while True:
@@ -737,41 +733,61 @@ def process_video_job(input_path: str, job_id: str, jobs_dict: dict,
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # Run AI only every N frames
-            if frame_idx % frame_skip == 0 or frame_idx == 1:
-                # Run detector (predict bypasses ByteTrack confidence filters)
-                results = tracking_model.predict(frame, verbose=False, imgsz=416, conf=0.01)
-                
-                last_boxes_data = []
-                current_visible = 0
-                
-                if results and results[0].boxes is not None:
-                    for box in results[0].boxes:
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-                        
-                        # Filter out massive boxes (e.g., the entire cage)
-                        frame_area = frame.shape[0] * frame.shape[1]
-                        if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
-                            continue
-                        
-                        current_visible += 1
-                        # Save box for drawing on intermediate frames
-                        conf = float(box.conf[0].item())
-                        last_boxes_data.append((int(x1), int(y1), int(x2), int(y2), conf))
-
-                if current_visible > max_visible:
-                    max_visible = current_visible
-
-            # Always draw boxes (either fresh or cached) to make playback perfectly smooth
+            # Run AI on EVERY frame for smooth shifting boxes and accurate counts
+            results = tracking_model.predict(frame, verbose=False, imgsz=320, conf=0.15)
+            
             annotated = frame.copy()
-            for x1, y1, x2, y2, conf in last_boxes_data:
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(annotated, f"Hen", (x1, y1 - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            current_visible = 0
+            rects = []
+            boxes_data = []
+            
+            if results and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    cls_id = int(box.cls[0].item())
+                    raw_name = results[0].names.get(cls_id, "unknown").lower()
+                    
+                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry", "cat", "dog")):
+                        continue
+                        
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    
+                    # Filter out massive boxes (e.g., the entire cage)
+                    frame_area = width * height
+                    if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
+                        continue
+                        
+                    rects.append((x1, y1, x2, y2))
+                    boxes_data.append((x1, y1, x2, y2, float(box.conf[0].item())))
+                    
+            # Update custom reliable tracker
+            objects = tracker.update(rects)
+            
+            for bx1, by1, bx2, by2, conf in boxes_data:
+                cx, cy = int((bx1+bx2)/2.0), int((by1+by2)/2.0)
+                best_id = None
+                best_dist = float('inf')
+                
+                for obj_id, (ocx, ocy) in objects.items():
+                    dist = math.sqrt((cx-ocx)**2 + (cy-ocy)**2)
+                    if dist < best_dist and dist < tracker.max_distance:
+                        best_dist = dist
+                        best_id = obj_id
+                
+                if best_id is not None:
+                    tid = best_id
+                    current_visible += 1
+                    unique_ids.add(tid)
+                    
+                    label_text = f"Hen #{tid}"
+                    color = (0, 255, 0)
+                    
+                    cv2.rectangle(annotated, (bx1, by1), (bx2, by2), color, 2)
+                    (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                    cv2.rectangle(annotated, (bx1, max(0, by1 - th - 8)), (bx1 + tw + 4, by1), color, -1)
+                    cv2.putText(annotated, label_text, (bx1 + 2, max(0, by1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
-            # Fallback: if tracker fails to assign IDs, at least show max visible hens
-            total_unique = max(len(unique_ids), max_visible)
-            label = f"Hens: {total_unique}"
+            total_unique = len(unique_ids)
+            label = f"Total Unique Hens: {total_unique} (Visible: {current_visible})"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
             cv2.putText(annotated, label, (9, th + 12),
