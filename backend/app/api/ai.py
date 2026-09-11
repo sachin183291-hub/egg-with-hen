@@ -601,7 +601,7 @@ async def drone_stream(ip: str):
     from app.ai.thermal_service import generate_thermal_stream
     
     # Optional: Basic validation of the IP or URL format
-    if not ip.startswith("http") and not ip.startswith("rtsp") and not ip.startswith("udp"):
+    if not ip.startswith("http") and not ip.startswith("rtsp") and not ip.startswith("rtmp") and not ip.startswith("udp"):
         # Assume it's a raw IP and format as an http stream if protocol is missing
         stream_url = f"http://{ip}:8080/video"
     else:

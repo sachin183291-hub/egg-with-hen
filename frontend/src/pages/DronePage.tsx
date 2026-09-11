@@ -168,7 +168,7 @@ export default function DronePage() {
 
               <div className="form-group">
                 <label htmlFor="droneIp" style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>
-                  Override Drone IP Address
+                  Drone IP Address or RTSP/RTMP URL
                 </label>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <input 

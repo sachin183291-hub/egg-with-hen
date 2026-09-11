@@ -257,7 +257,7 @@ export default function ThermalCameraPage() {
               background: 'rgba(255,255,255,0.02)'
             }}>
               <Video size={48} color="var(--brand-400)" style={{ marginBottom: '16px' }} />
-              <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '16px' }}>Connect to Global Drone IP</span>
+              <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '16px' }}>Connect to Drone IP or RTSP/RTMP URL</span>
               <button className="btn btn-primary" onClick={connectLiveStream}>
                 Connect Live Stream
               </button>

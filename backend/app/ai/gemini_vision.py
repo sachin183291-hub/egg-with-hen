@@ -127,10 +127,10 @@ class GeminiVisionDetector(ImageDetector):
             
             prompt = (
                 f"{SYSTEM_INSTRUCTION}\n\n"
-                "You are provided with TWO images. The FIRST image is the TOP VIEW. The SECOND image is the SIDE VIEW.\n"
+                "You are provided with TWO images. One is a TOP VIEW, and the other is a SIDE VIEW. You must determine which is which based on their content.\n"
                 "To correctly count the egg trays, STRICTLY follow these rules:\n"
-                "1. Look at the SIDE VIEW (second image) and count how many trays are placed in a single vertical stack. Usually, there will be 1 tray visible on top and 19 trays underneath it, making exactly 20 trays per stack.\n"
-                "2. Look at the TOP VIEW (first image) and count how many individual stacks of trays are visible.\n"
+                "1. Look at the SIDE VIEW image and count how many trays are placed in a single vertical stack. Usually, there will be 1 tray visible on top and 19 trays underneath it, making exactly 20 trays per stack.\n"
+                "2. Look at the TOP VIEW image and count how many individual stacks of trays are visible.\n"
                 "3. Multiply the number of stacks from the Top View by the number of trays in a single stack from the Side View (e.g. 20) to get the total `tray_count`.\n"
                 "4. Calculate the total `egg_count` as EXACTLY: `tray_count` * 30 (since each tray holds 30 eggs).\n"
                 "Count both real physical objects and any hand-drawn/synthetic test shapes accurately. DO NOT guess the tray count. Calculate carefully.\n"

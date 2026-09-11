@@ -932,6 +932,11 @@ async def generate_uploaded_video_stream(input_path: str):
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
+        print(f"Failed to open video at {input_path}")
+        error_img = np.zeros((400, 600, 3), dtype=np.uint8)
+        cv2.putText(error_img, "Error: Could not open video file.", (50, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        _, buf = cv2.imencode(".jpg", error_img)
+        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
