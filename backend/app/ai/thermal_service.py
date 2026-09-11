@@ -880,12 +880,13 @@ STREAM_COUNTS = {}
 async def generate_uploaded_video_stream(input_path: str):
     """
     Generator that serves an uploaded video as a perfectly smooth MJPEG stream in real-time.
-    Runs YOLO ByteTrack on every single frame to ensure boxes smoothly shift over the hens
-    without any lag or stuttering.
+    Runs YOLO predict and custom CentroidTracker on every single frame to ensure 
+    all hens (even low confidence) are counted and boxes smoothly shift over them.
     """
     import asyncio
     import cv2
     import numpy as np
+    import math
     import time
     import os
 
@@ -908,6 +909,9 @@ async def generate_uploaded_video_stream(input_path: str):
     tracking_model = get_tracking_model()
     unique_ids: set = set()
     
+    # Simple, highly reliable distance tracker (bypasses YOLO strict track_high_thresh limits)
+    tracker = CentroidTracker(max_disappeared=10, max_distance=60)
+    
     try:
         while True:
             start_time = time.time()
@@ -918,13 +922,9 @@ async def generate_uploaded_video_stream(input_path: str):
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # Run tracking on EVERY frame for perfectly smooth shifting boxes!
-            # Using bytetrack.yaml which is extremely fast on CPU (no deep ReID)
-            # imgsz=320 balances detection accuracy and real-time speed
-            results = tracking_model.track(
+            # Use predict() instead of track() to catch all hens > 0.15 conf
+            results = tracking_model.predict(
                 frame, 
-                persist=True, 
-                tracker="bytetrack.yaml", 
                 verbose=False, 
                 imgsz=320, 
                 conf=0.15
@@ -932,6 +932,8 @@ async def generate_uploaded_video_stream(input_path: str):
             
             annotated = frame.copy()
             current_visible = 0
+            rects = []
+            boxes_data = []
             
             if len(results) > 0 and results[0].boxes is not None:
                 for box in results[0].boxes:
@@ -942,22 +944,46 @@ async def generate_uploaded_video_stream(input_path: str):
                     if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry", "cat", "dog")):
                         continue
                         
-                    if box.id is not None:
-                        tid = int(box.id[0].item())
-                        current_visible += 1
-                        unique_ids.add(tid)
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    
+                    # Filter massive boxes
+                    frame_area = width * height
+                    if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
+                        continue
                         
-                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                        label_text = f"Hen #{tid}"
-                        color = (0, 255, 0)  # Green
-                        
-                        # Draw perfectly shifting box on the head/body
-                        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-                        
-                        # Draw text label smoothly
-                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                        cv2.rectangle(annotated, (x1, max(0, y1 - th - 8)), (x1 + tw + 4, y1), color, -1)
-                        cv2.putText(annotated, label_text, (x1 + 2, max(0, y1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+                    rects.append((x1, y1, x2, y2))
+                    boxes_data.append((x1, y1, x2, y2, float(box.conf[0].item())))
+                    
+            # Update our custom reliable tracker
+            objects = tracker.update(rects)
+            
+            # Match IDs to the drawn boxes for smooth shifting
+            for bx1, by1, bx2, by2, conf in boxes_data:
+                cx, cy = int((bx1+bx2)/2.0), int((by1+by2)/2.0)
+                best_id = None
+                best_dist = float('inf')
+                
+                for obj_id, (ocx, ocy) in objects.items():
+                    dist = math.sqrt((cx-ocx)**2 + (cy-ocy)**2)
+                    if dist < best_dist and dist < tracker.max_distance:
+                        best_dist = dist
+                        best_id = obj_id
+                
+                if best_id is not None:
+                    tid = best_id
+                    current_visible += 1
+                    unique_ids.add(tid)
+                    
+                    label_text = f"Hen #{tid}"
+                    color = (0, 255, 0)  # Green
+                    
+                    # Draw perfectly shifting box on the head/body
+                    cv2.rectangle(annotated, (bx1, by1), (bx2, by2), color, 2)
+                    
+                    # Draw text label smoothly
+                    (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                    cv2.rectangle(annotated, (bx1, max(0, by1 - th - 8)), (bx1 + tw + 4, by1), color, -1)
+                    cv2.putText(annotated, label_text, (bx1 + 2, max(0, by1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
             total_unique = len(unique_ids)
             STREAM_COUNTS[input_path] = total_unique
