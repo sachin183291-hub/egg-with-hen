@@ -880,14 +880,14 @@ STREAM_COUNTS = {}
 async def generate_uploaded_video_stream(input_path: str):
     """
     Generator that serves an uploaded video as a perfectly smooth MJPEG stream in real-time.
-    Uses a background thread for YOLOWorld AI to ensure the video never stutters.
+    Runs YOLO ByteTrack on every single frame to ensure boxes smoothly shift over the hens
+    without any lag or stuttering.
     """
     import asyncio
-    import threading
-    import queue
+    import cv2
     import numpy as np
     import time
-    import traceback
+    import os
 
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -905,78 +905,9 @@ async def generate_uploaded_video_stream(input_path: str):
         width = int(width * scale)
         height = int(height * scale)
 
-    TARGET_AI_FPS = 5
-    frame_skip = max(1, int(fps / TARGET_AI_FPS))
-
     tracking_model = get_tracking_model()
-    
     unique_ids: set = set()
-    max_visible = 0
-    frame_idx = 0
-    current_boxes = []
     
-    # Simple, highly reliable distance tracker (bypasses YOLO harsh limits)
-    tracker = CentroidTracker(max_disappeared=10, max_distance=60)
-    
-    # Use a background thread for AI so video never stops or lags
-    ai_thread_running = True
-    frame_queue = queue.Queue(maxsize=1)
-
-    def ai_worker():
-        nonlocal current_boxes, max_visible
-        while ai_thread_running:
-            try:
-                frame_for_ai = frame_queue.get(timeout=0.5)
-            except queue.Empty:
-                continue
-                
-            try:
-                # Run AI (predict bypasses ByteTrack filters)
-                results = tracking_model.predict(frame_for_ai, verbose=False, imgsz=416, conf=0.01)
-                rects = []
-                new_boxes_data = []
-                
-                if results and results[0].boxes is not None:
-                    for box in results[0].boxes:
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-                        
-                        # Filter out massive boxes (background)
-                        frame_area = frame_for_ai.shape[0] * frame_for_ai.shape[1]
-                        if (x2 - x1) * (y2 - y1) > (frame_area * 0.3):
-                            continue
-                        
-                        rects.append((int(x1), int(y1), int(x2), int(y2)))
-                        new_boxes_data.append((int(x1), int(y1), int(x2), int(y2), float(box.conf[0].item())))
-                
-                # Update our custom tracker
-                objects = tracker.update(rects)
-                
-                # Match IDs to the drawn boxes
-                matched_boxes = []
-                for bx1, by1, bx2, by2, conf in new_boxes_data:
-                    cx, cy = int((bx1+bx2)/2.0), int((by1+by2)/2.0)
-                    best_id = None
-                    best_dist = float('inf')
-                    for obj_id, (ocx, ocy) in objects.items():
-                        dist = math.sqrt((cx-ocx)**2 + (cy-ocy)**2)
-                        if dist < best_dist and dist < tracker.max_distance:
-                            best_dist = dist
-                            best_id = obj_id
-                    
-                    if best_id is not None:
-                        unique_ids.add(best_id)
-                        matched_boxes.append((bx1, by1, bx2, by2, conf, best_id))
-                
-                current_boxes = matched_boxes
-                if len(rects) > max_visible:
-                    max_visible = len(rects)
-            except Exception as e:
-                print(f"[AI Thread Error]: {e}")
-                traceback.print_exc()
-
-    # Start the background AI worker
-    threading.Thread(target=ai_worker, daemon=True).start()
-
     try:
         while True:
             start_time = time.time()
@@ -984,32 +915,54 @@ async def generate_uploaded_video_stream(input_path: str):
             if not ret:
                 break
                 
-            frame_idx += 1
             if scale != 1.0:
                 frame = cv2.resize(frame, (width, height))
 
-            # Send frame to AI thread if it's ready
-            if frame_idx % frame_skip == 0 and frame_queue.empty():
-                frame_queue.put(frame.copy())
-
+            # Run tracking on EVERY frame for perfectly smooth shifting boxes!
+            # Using bytetrack.yaml which is extremely fast on CPU (no deep ReID)
+            # imgsz=320 balances detection accuracy and real-time speed
+            results = tracking_model.track(
+                frame, 
+                persist=True, 
+                tracker="bytetrack.yaml", 
+                verbose=False, 
+                imgsz=320, 
+                conf=0.15
+            )
+            
             annotated = frame.copy()
-            # Draw instantly using the latest boxes from the AI thread
-            for x1, y1, x2, y2, conf, tid in current_boxes:
-                label_text = f"Hen #{tid}"
-                color = (0, 255, 0)  # Green in BGR
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-                
-                # Draw filled rectangle for text background
-                (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                cv2.rectangle(annotated, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
-                
-                # Draw text in black over the filled background
-                cv2.putText(annotated, label_text, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            current_visible = 0
+            
+            if len(results) > 0 and results[0].boxes is not None:
+                for box in results[0].boxes:
+                    cls_id = int(box.cls[0].item())
+                    raw_name = results[0].names.get(cls_id, "unknown").lower()
+                    
+                    # Accept any plausible class since from top-down hens can be misclassified
+                    if not any(k in raw_name for k in ("hen", "bird", "chicken", "animal", "poultry", "cat", "dog")):
+                        continue
+                        
+                    if box.id is not None:
+                        tid = int(box.id[0].item())
+                        current_visible += 1
+                        unique_ids.add(tid)
+                        
+                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                        label_text = f"Hen #{tid}"
+                        color = (0, 255, 0)  # Green
+                        
+                        # Draw perfectly shifting box on the head/body
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                        
+                        # Draw text label smoothly
+                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                        cv2.rectangle(annotated, (x1, max(0, y1 - th - 8)), (x1 + tw + 4, y1), color, -1)
+                        cv2.putText(annotated, label_text, (x1 + 2, max(0, y1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
-            total_unique = max(len(unique_ids), max_visible)
+            total_unique = len(unique_ids)
             STREAM_COUNTS[input_path] = total_unique
             
-            label = f"Live Unique Hens: {total_unique}"
+            label = f"Live Unique Hens: {total_unique}  (Visible: {current_visible})"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
             cv2.rectangle(annotated, (5, 5), (tw + 16, th + 18), (0, 0, 0), -1)
             cv2.putText(annotated, label, (9, th + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -1023,20 +976,19 @@ async def generate_uploaded_video_stream(input_path: str):
             
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
             
-        # Video Finished: Send a final frame with "FINISHED" text
+        # Video Finished
         final_frame = np.zeros((height, width, 3), dtype=np.uint8)
         final_text = f"FINISHED! Final Count: {total_unique}"
-        cv2.putText(final_frame, final_text, (50, height//2), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
+        cv2.putText(final_frame, final_text, (50, height//2), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
         _, buf = cv2.imencode(".jpg", final_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
         yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
-        
-        # Keep the final image on screen for a moment before disconnecting
         await asyncio.sleep(3.0)
 
     finally:
-        ai_thread_running = False
         cap.release()
         try:
-            os.remove(input_path)
+            if os.path.exists(input_path):
+                os.remove(input_path)
         except Exception:
             pass
+
