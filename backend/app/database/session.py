@@ -9,10 +9,21 @@ from typing import Generator
 from app.config import settings
 from app.database.models import Base
 
+import os
+from pathlib import Path
+
+# Fix relative SQLite paths to always resolve to the backend directory
+# regardless of where uvicorn is started from.
+db_url = settings.DATABASE_URL
+if db_url.startswith("sqlite:///./"):
+    db_name = db_url.replace("sqlite:///./", "")
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    db_url = f"sqlite:///{backend_dir / db_name}"
+
 # Create engine with appropriate settings per DB type
-if settings.DATABASE_URL.startswith("sqlite"):
+if db_url.startswith("sqlite"):
     engine = create_engine(
-        settings.DATABASE_URL,
+        db_url,
         connect_args={"check_same_thread": False},
         echo=settings.DEBUG,
     )
