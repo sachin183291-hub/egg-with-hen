@@ -21,13 +21,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem('access_token')
-    if (token) {
-      authApi.me()
-        .then(r => setUser(r.data))
-        .catch(() => { localStorage.clear(); setUser(null) })
-        .finally(() => setLoading(false))
-    } else {
+    if (!token) {
+      // No token stored — go straight to login, no network call needed
       setLoading(false)
+      return
+    }
+
+    // Fast timeout (5s) — if backend is slow/offline, show login immediately
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => {
+      controller.abort()
+      localStorage.clear()
+      setUser(null)
+      setLoading(false)
+    }, 5000)
+
+    authApi.me()
+      .then(r => setUser(r.data))
+      .catch(() => { localStorage.clear(); setUser(null) })
+      .finally(() => {
+        clearTimeout(timeoutId)
+        setLoading(false)
+      })
+
+    return () => {
+      clearTimeout(timeoutId)
+      controller.abort()
     }
   }, [])
 

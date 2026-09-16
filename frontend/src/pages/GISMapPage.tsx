@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { gisApi } from '../services/api'
 import type { GISMarker, EvidenceStatus } from '../types'
 import { evidenceStatusBadgeClass, markerColor, makeMarkerIcon, formatDateTime, formatPercent } from '../utils/helpers'
@@ -16,16 +16,32 @@ const STATUS_FILTERS = [
   { value: 'PENDING_SYNC', label: 'Pending' },
 ]
 
+// Tile layer definitions
+const TILE_LAYERS = {
+  satellite: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri',
+    label: 'Satellite',
+  },
+  street: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap contributors',
+    label: 'Street',
+  },
+}
+
 export default function GISMapPage() {
   const navigate = useNavigate()
   const mapRef = useRef<any>(null)
+  const tileLayerRef = useRef<any>(null)
   const mapDivRef = useRef<HTMLDivElement>(null)
   const [markers, setMarkers] = useState<GISMarker[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<GISMarker | null>(null)
+  const [mapMode, setMapMode] = useState<'satellite' | 'street'>('satellite')
 
-  // Initialize Leaflet map
+  // Initialize Leaflet map with satellite as default
   useEffect(() => {
     if (!mapDivRef.current || mapRef.current) return
     if (typeof L === 'undefined') {
@@ -34,18 +50,38 @@ export default function GISMapPage() {
     }
 
     const map = L.map(mapDivRef.current, { zoomControl: true }).setView([11.0890, 78.1220], 10)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
+
+    // Default satellite tile layer
+    const satLayer = L.tileLayer(TILE_LAYERS.satellite.url, {
+      attribution: TILE_LAYERS.satellite.attribution,
+      maxZoom: 19,
     }).addTo(map)
+
+    tileLayerRef.current = satLayer
     mapRef.current = map
 
     return () => {
       if (mapRef.current) {
         mapRef.current.remove()
         mapRef.current = null
+        tileLayerRef.current = null
       }
     }
   }, [])
+
+  // Switch tile layer when mapMode changes
+  useEffect(() => {
+    if (!mapRef.current || typeof L === 'undefined') return
+    if (tileLayerRef.current) {
+      mapRef.current.removeLayer(tileLayerRef.current)
+    }
+    const layerDef = TILE_LAYERS[mapMode]
+    const newLayer = L.tileLayer(layerDef.url, {
+      attribution: layerDef.attribution,
+      maxZoom: 19,
+    }).addTo(mapRef.current)
+    tileLayerRef.current = newLayer
+  }, [mapMode])
 
   // Load and render markers
   useEffect(() => {
@@ -61,7 +97,6 @@ export default function GISMapPage() {
   const renderMarkers = (data: GISMarker[]) => {
     if (!mapRef.current || typeof L === 'undefined') return
 
-    // Clear existing markers
     mapRef.current.eachLayer((layer: any) => {
       if (layer._giotag_marker) mapRef.current.removeLayer(layer)
     })
@@ -88,7 +123,7 @@ export default function GISMapPage() {
           <p>📅 <strong>Time:</strong> ${new Date(marker.capture_timestamp).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true })}</p>
           <p>📍 <strong>GPS:</strong> ${marker.latitude.toFixed(5)}, ${marker.longitude.toFixed(5)}</p>
           <p>🩺 <strong>Status:</strong> <span style="color: ${color}; font-weight: bold;">${marker.status.replace('_', ' ')}</span></p>
-          ${marker.ai_confidence != null ? `<p>🧠 <strong>AI Confidence:</strong> ${(marker.ai_confidence * 100).toFixed(0)}%</p>` : ''}
+          ${marker.ai_confidence != null ? '<p>🧠 <strong>AI Confidence:</strong> ' + (marker.ai_confidence * 100).toFixed(0) + '%</p>' : ''}
         </div>
       `
       lmarker.bindPopup(popupContent)
@@ -102,10 +137,10 @@ export default function GISMapPage() {
           <h1 className="page-title">GIS Evidence Map</h1>
           <p className="page-subtitle">{markers.length} evidence records plotted</p>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
           {STATUS_FILTERS.map(f => (
             <button key={f.value}
-              className={`btn btn-sm ${statusFilter === f.value ? 'btn-primary' : 'btn-secondary'}`}
+              className={"btn btn-sm " + (statusFilter === f.value ? 'btn-primary' : 'btn-secondary')}
               onClick={() => setStatusFilter(f.value)}
             >{f.label}</button>
           ))}
@@ -113,16 +148,36 @@ export default function GISMapPage() {
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:20 }}>
-        {/* Map */}
         <div>
-          <div ref={mapDivRef} style={{ height:600, borderRadius:'var(--radius-lg)', overflow:'hidden', border:'1px solid var(--border-subtle)' }} />
-          {loading && (
-            <div style={{ position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)' }}>
-              <div className="spinner" />
-            </div>
-          )}
+          {/* Layer Toggle */}
+          <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+            <button
+              className={"btn btn-sm " + (mapMode === 'satellite' ? 'btn-primary' : 'btn-secondary')}
+              onClick={() => setMapMode('satellite')}
+            >🛰️ Satellite</button>
+            <button
+              className={"btn btn-sm " + (mapMode === 'street' ? 'btn-primary' : 'btn-secondary')}
+              onClick={() => setMapMode('street')}
+            >🗺️ Street</button>
+          </div>
 
-          {/* Legend */}
+          <div style={{ position:'relative' }}>
+            <div
+              ref={mapDivRef}
+              style={{
+                height: 580,
+                borderRadius: 'var(--radius-lg)',
+                overflow: 'hidden',
+                border: '1px solid var(--border-subtle)',
+              }}
+            />
+            {loading && (
+              <div style={{ position:'absolute', top:'50%', left:'50%', transform:'translate(-50%,-50%)', zIndex:999 }}>
+                <div className="spinner" />
+              </div>
+            )}
+          </div>
+
           <div className="card" style={{ marginTop:12, padding:'12px 16px' }}>
             <div style={{ display:'flex', gap:20, flexWrap:'wrap' }}>
               {[
@@ -140,7 +195,6 @@ export default function GISMapPage() {
           </div>
         </div>
 
-        {/* Selected Evidence Panel */}
         <div>
           {selected ? (
             <div className="card">
@@ -149,15 +203,12 @@ export default function GISMapPage() {
                 <button className="btn btn-ghost btn-sm" onClick={() => setSelected(null)}>✕</button>
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                <div>
-                  <span style={{ fontSize:'1rem', fontWeight:700, color:'var(--text-primary)' }}>
-                    {selected.evidence_number}
-                  </span>
-                </div>
+                <span style={{ fontSize:'1rem', fontWeight:700, color:'var(--text-primary)' }}>
+                  {selected.evidence_number}
+                </span>
                 <span className={evidenceStatusBadgeClass(selected.status)}>
                   {selected.status.replace('_', ' ')}
                 </span>
-
                 <div className="detail-item">
                   <span className="detail-label">Officer</span>
                   <span className="detail-value">{selected.officer_name}</span>
@@ -185,21 +236,20 @@ export default function GISMapPage() {
                   </div>
                 )}
                 <button className="btn btn-primary btn-sm"
-                  onClick={() => navigate(`/evidence/${selected.evidence_id}`)}>
+                  onClick={() => navigate("/evidence/" + selected.evidence_id)}>
                   View Full Details →
                 </button>
               </div>
             </div>
           ) : (
             <div className="card" style={{ textAlign:'center', padding:40 }}>
-              <div style={{ fontSize:32, marginBottom:8 }}>🗺️</div>
+              <div style={{ fontSize:32, marginBottom:8 }}>🛰️</div>
               <p style={{ color:'var(--text-muted)', fontSize:'0.85rem' }}>
                 Click a marker on the map to see evidence details
               </p>
             </div>
           )}
 
-          {/* Summary */}
           <div className="card" style={{ marginTop:12 }}>
             <h4 className="card-title" style={{ marginBottom:12, fontSize:'0.85rem' }}>Evidence Summary</h4>
             {[
@@ -210,7 +260,7 @@ export default function GISMapPage() {
             ].map(s => (
               <div key={s.label} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid var(--border-subtle)' }}>
                 <span style={{ fontSize:'0.8rem', color:'var(--text-secondary)' }}>{s.label}</span>
-                <span style={{ fontSize:'0.8rem', fontWeight:700, color: s.color ?? 'var(--text-primary)' }}>{s.value}</span>
+                <span style={{ fontSize:'0.8rem', fontWeight:700, color: s.color || 'var(--text-primary)' }}>{s.value}</span>
               </div>
             ))}
           </div>
