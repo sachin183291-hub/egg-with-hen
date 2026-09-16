@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { gisApi } from '../services/api'
 import type { GISMarker, EvidenceStatus } from '../types'
 import { evidenceStatusBadgeClass, markerColor, makeMarkerIcon, formatDateTime, formatPercent } from '../utils/helpers'
@@ -19,8 +19,8 @@ const STATUS_FILTERS = [
 // Tile layer definitions
 const TILE_LAYERS = {
   satellite: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri',
+    url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    attribution: '© Google',
     label: 'Satellite',
   },
   street: {
