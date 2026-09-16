@@ -5,6 +5,7 @@ import os
 import tempfile
 from typing import Dict, Any, Tuple, List
 import math
+# pyrefly: ignore [missing-import]
 from app.ai.yolo_service import load_model
 # pyrefly: ignore [missing-import]
 from ultralytics import YOLO

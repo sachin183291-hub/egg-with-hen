@@ -61,7 +61,7 @@ class GioTagApp extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Image.asset('assets/images/logo.png', width: 64, height: 64),
+                    Image.asset('assets/images/logo.png', width: 64, height: 64), 
                     SizedBox(height: 16),
                     CircularProgressIndicator(color: Color(0xFF6366F1)),
                     SizedBox(height: 12),
