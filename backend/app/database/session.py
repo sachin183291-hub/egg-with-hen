@@ -20,6 +20,10 @@ if db_url.startswith("sqlite:///./"):
     backend_dir = Path(__file__).resolve().parent.parent.parent
     db_url = f"sqlite:///{backend_dir / db_name}"
 
+# Fix for Render: SQLAlchemy 1.4+ requires postgresql:// instead of postgres://
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
 # Create engine with appropriate settings per DB type
 if db_url.startswith("sqlite"):
     engine = create_engine(
@@ -29,7 +33,7 @@ if db_url.startswith("sqlite"):
     )
 else:
     engine = create_engine(
-        settings.DATABASE_URL,
+        db_url,
         pool_pre_ping=True,
         pool_size=10,
         max_overflow=20,

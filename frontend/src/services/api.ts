@@ -3,12 +3,15 @@
  */
 import axios from 'axios'
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+// On Render: VITE_API_URL is injected at build time from the backend service URL
+// On localhost: empty string means Vite proxy handles /api/* → http://127.0.0.1:8000
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 
 export const api = axios.create({
   baseURL: API_URL,
   timeout: 600000,  // 10 minutes default — enough for video analysis
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: false,  // use token-based auth (Bearer), not cookies
 })
 
 // ─── Request interceptor: attach JWT ─────────────────────────────────────────
