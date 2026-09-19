@@ -1,7 +1,8 @@
 """Password hashing utilities using passlib/bcrypt."""
 from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# rounds=10 balances security and speed (12 is too slow for interactive login)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=10)
 
 
 def hash_password(plain_password: str) -> str:

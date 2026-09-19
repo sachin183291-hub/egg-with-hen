@@ -35,13 +35,27 @@ export default function LoginPage() {
     }
   }
 
-  const quickLogin = (preset: { email: string; password: string }) => {
+  const quickLogin = async (preset: { email: string; password: string }) => {
     setEmail(preset.email)
     setPassword(preset.password)
+    // Auto-submit immediately with the preset credentials
+    setError('')
+    setSubmitting(true)
+    try {
+      await login(preset.email, preset.password)
+      toast.success('Welcome back!')
+      navigate('/')
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || 'Login failed. Check your credentials.'
+      setError(msg)
+      toast.error(msg)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const demoAccounts = [
-    { label: 'Super Admin', email: 'admin@giotag.gov', password: 'Admin@123!' },
+    { label: '⚡ Super Admin', email: 'admin@giotag.gov', password: 'Admin@123!' },
     { label: 'Dept Admin', email: 'deptadmin@giotag.gov', password: 'DeptAdmin@123!' },
     { label: 'Field Officer', email: 'officer1@giotag.gov', password: 'Officer@123!' },
     { label: 'Viewer', email: 'viewer@giotag.gov', password: 'Viewer@123!' },
