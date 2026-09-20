@@ -147,7 +147,7 @@ export default function GISMapPage() {
         </div>
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 300px', gap:20 }}>
+      <div className="responsive-grid-map">
         <div>
           {/* Layer Toggle */}
           <div style={{ display:'flex', gap:8, marginBottom:8 }}>

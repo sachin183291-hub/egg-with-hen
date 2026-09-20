@@ -78,7 +78,7 @@ export default function DronePage() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '24px' }}>
+      <div className="responsive-grid-drone">
         
         {/* Main Left Column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
