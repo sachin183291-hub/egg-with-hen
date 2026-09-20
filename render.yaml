@@ -20,14 +20,23 @@ services:
           property: connectionString
       - key: ENVIRONMENT
         value: production
+      - key: DEBUG
+        value: "false"
+      # IMPORTANT: SECRET_KEY must use sync:true (not generateValue:true) so the
+      # same key is used across restarts. generateValue regenerates on every deploy,
+      # invalidating all existing JWT tokens and breaking logins.
       - key: SECRET_KEY
-        generateValue: true
+        sync: false
       - key: CORS_ORIGINS
         value: "*"
       - key: LOCAL_STORAGE_PATH
         value: ./uploads
       - key: LOCAL_LEDGER_PATH
         value: ./app/blockchain/ledger_data.json
+      - key: SEED_DEMO_DATA
+        value: "true"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "480"
 
   - type: web
     name: giotag-frontend

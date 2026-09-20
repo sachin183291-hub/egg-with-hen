@@ -109,9 +109,104 @@ def fake_image_hash(seed: str) -> str:
     return hashlib.sha256(seed.encode()).hexdigest()
 
 
+def ensure_super_admin_active():
+    """Always ensure the super admin account is active and has valid credentials.
+
+    This runs on EVERY startup in hosted/production environments to fix:
+    - Account disabled (is_active=False)
+    - Account soft-deleted (deleted_at set)
+    - Stale/wrong password hash (re-hashes the expected password each time)
+    - Missing super admin (creates it if not found — needed for fresh Postgres DBs)
+    """
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.email == "admin@giotag.gov").first()
+
+        if admin:
+            changed = False
+
+            # Fix: account disabled
+            if not admin.is_active:
+                admin.is_active = True
+                changed = True
+                print("[FIX] Super admin was disabled — re-enabled is_active=True")
+
+            # Fix: account soft-deleted
+            if admin.deleted_at is not None:
+                admin.deleted_at = None
+                changed = True
+                print("[FIX] Super admin had deleted_at set — cleared")
+
+            # Always refresh the password hash to ensure it matches expected credentials.
+            # This prevents a stale/corrupt hash from blocking login after a DB migration
+            # or if bcrypt rounds changed.
+            from app.security.password import hash_password, verify_password
+            expected_password = "Admin@123!"
+            if not verify_password(expected_password, admin.hashed_password):
+                admin.hashed_password = hash_password(expected_password)
+                changed = True
+                print("[FIX] Super admin password hash was invalid — reset to default")
+
+            # Fix: ensure role is correct
+            if admin.role != RoleEnum.SUPER_ADMIN:
+                admin.role = RoleEnum.SUPER_ADMIN
+                changed = True
+                print("[FIX] Super admin role was wrong — corrected to SUPER_ADMIN")
+
+            if changed:
+                db.commit()
+                print("[OK] Super admin account restored successfully")
+            else:
+                print("[OK] Super admin account is active and healthy")
+
+        else:
+            # Super admin missing entirely — create it now (fresh Postgres DB, first deploy)
+            print("[INFO] Super admin not found — creating it now...")
+            from app.security.password import hash_password
+
+            # We need a department first
+            dept = db.query(Department).filter(Department.code == "ADMIN").first()
+            if not dept:
+                dept = Department(
+                    id=str(uuid.uuid4()),
+                    name="Administration",
+                    code="ADMIN",
+                    description="Administrative staff",
+                )
+                db.add(dept)
+                db.flush()
+
+            admin = User(
+                id=str(uuid.uuid4()),
+                email="admin@giotag.gov",
+                username="superadmin",
+                full_name="System Administrator",
+                phone="+1-555-0100",
+                hashed_password=hash_password("Admin@123!"),
+                role=RoleEnum.SUPER_ADMIN,
+                department_id=dept.id,
+                is_active=True,
+                is_verified=True,
+                deleted_at=None,
+            )
+            db.add(admin)
+            db.commit()
+            print("[OK] Super admin created: admin@giotag.gov / Admin@123!")
+
+    except Exception as e:
+        db.rollback()
+        print(f"[WARNING] ensure_super_admin_active failed: {e}")
+    finally:
+        db.close()
+
+
 def seed():
     print("[START] Starting demo data seed...")
     create_tables()
+
+    # Always run super admin health check first (fixes hosted env issues)
+    ensure_super_admin_active()
+
     db = SessionLocal()
 
     try:

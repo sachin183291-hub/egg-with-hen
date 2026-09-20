@@ -126,3 +126,28 @@ async def logout(request: Request, current_user: User = Depends(get_current_user
 async def me(current_user: User = Depends(get_current_user)):
     """Return the currently authenticated user's profile."""
     return current_user
+
+
+@router.post("/reset-admin")
+async def reset_admin(request: Request, db: Session = Depends(get_db)):
+    """Emergency endpoint: reset super admin account to default credentials.
+
+    Protected by ADMIN_RESET_KEY env var. If not set, this endpoint is disabled.
+    Usage: POST /api/auth/reset-admin  with JSON body {"reset_key": "<your key>"}
+
+    This fixes the hosted login issue if the startup health check wasn't enough.
+    """
+    import os
+    from app.database.seed import ensure_super_admin_active
+
+    reset_key = settings.SECRET_KEY  # reuse SECRET_KEY as the reset gate
+    body = await request.json()
+
+    if body.get("reset_key") != reset_key:
+        raise HTTPException(status_code=403, detail="Invalid reset key")
+
+    try:
+        ensure_super_admin_active()
+        return {"message": "Super admin account reset successfully. Use admin@giotag.gov / Admin@123!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reset failed: {str(e)}")

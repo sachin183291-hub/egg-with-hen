@@ -92,6 +92,14 @@ async def startup_event():
     """Initialize DB tables and seed demo data if configured."""
     create_tables()
 
+    # ALWAYS run super admin health check — ensures login works in hosted environments
+    # even after redeploys, DB migrations, or free-tier container restarts.
+    try:
+        from app.database.seed import ensure_super_admin_active
+        ensure_super_admin_active()
+    except Exception as e:
+        print(f"[WARNING] Super admin health check failed: {e}")
+
     if settings.SEED_DEMO_DATA:
         try:
             from app.database.seed import seed
