@@ -62,7 +62,7 @@ export default function InstallPrompt() {
 
   return (
     <div style={{
-      position: 'fixed',
+      position: 'sticky',
       top: 0, left: 0, right: 0,
       backgroundColor: '#1e293b',
       zIndex: 99999,
