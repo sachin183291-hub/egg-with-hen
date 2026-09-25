@@ -133,6 +133,10 @@ export default function HenTrackingPage() {
     setIsProcessing(true)
     setCameraError(null)
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera access is blocked by your browser. Since you are using a local IP (http://10.x.x.x), you MUST open chrome://flags/#unsafely-treat-insecure-origin-as-secure in your mobile Chrome, enter your IP, and enable it!')
+      }
+      
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
       if (videoRef.current) {
         videoRef.current.srcObject = stream
