@@ -15,6 +15,7 @@ export default function HenTrackingPage() {
   const [error, setError]                   = useState<string | null>(null)
   
   const [isLiveMode, setIsLiveMode]         = useState(false)
+  const [isCameraOpen, setIsCameraOpen]     = useState(false)
   const [cameraError, setCameraError]       = useState<string | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -47,6 +48,7 @@ export default function HenTrackingPage() {
     setProgress(0)
     setError(null)
     setIsLiveMode(false)
+    setIsCameraOpen(false)
     setCameraError(null)
   }
 
@@ -135,6 +137,7 @@ export default function HenTrackingPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         videoRef.current.play()
+        setIsCameraOpen(true)
       }
 
       let wsUrl: string
@@ -196,6 +199,7 @@ export default function HenTrackingPage() {
       setCameraError('Failed to access camera: ' + err.message)
       setIsProcessing(false)
       setIsLiveMode(false)
+      setIsCameraOpen(false)
     }
   }
 
@@ -228,7 +232,6 @@ export default function HenTrackingPage() {
         </div>
       </header>
 
-      <video ref={videoRef} playsInline muted style={{ display: 'none' }} />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
       <div style={{ display: 'flex', flexDirection: 'row', gap: '24px', flexWrap: 'wrap' }}>
@@ -271,52 +274,66 @@ export default function HenTrackingPage() {
           )}
           {cameraError && <p style={{ color: 'red' }}>{cameraError}</p>}
 
-          {/* Waiting for first frame */}
-          {(jobId || isLiveMode) && !wsFrameBase64 && !isDone && (
+          {/* Waiting for first frame (for file upload only, or before camera grants permission) */}
+          {((jobId && !wsFrameBase64) || (isLiveMode && !isCameraOpen)) && !isDone && (
             <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '60px', border: '2px dashed var(--border)', borderRadius: '12px' }}>
               <div style={{ width: '44px', height: '44px', borderRadius: '50%', border: '4px solid rgba(59,130,246,0.15)', borderTop: '4px solid #3b82f6', animation: 'spin 0.9s linear infinite' }} />
               <p style={{ color: 'var(--text-muted)', fontWeight: '500', textAlign: 'center' }}>
-                🤖 AI processing first frame…<br />
-                <span style={{ fontSize: '0.85rem' }}>Stream starting shortly</span>
+                {isLiveMode ? '📷 Opening Camera...' : '🤖 AI processing first frame…'}<br />
+                <span style={{ fontSize: '0.85rem' }}>{isLiveMode ? 'Please allow camera access.' : 'Stream starting shortly'}</span>
               </p>
             </div>
           )}
 
-          {/* Live stream */}
-          {wsFrameBase64 && (
-            <div className="fade-in" style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: `2px solid ${isDone ? '#22c55e' : '#3b82f6'}`, background: '#000' }}>
+          {/* Video / Stream Container */}
+          <div className="fade-in" style={{ 
+            display: (wsFrameBase64 || isCameraOpen) ? 'block' : 'none',
+            position: 'relative', borderRadius: '12px', overflow: 'hidden', 
+            border: `2px solid ${isDone ? '#22c55e' : '#3b82f6'}`, background: '#000' 
+          }}>
+            <video 
+              ref={videoRef} 
+              playsInline 
+              muted 
+              autoPlay
+              style={{ 
+                display: (isCameraOpen && !wsFrameBase64) ? 'block' : 'none', 
+                width: '100%', height: 'auto', maxHeight: '550px', objectFit: 'contain'
+              }} 
+            />
+            {wsFrameBase64 && (
               <img
                 src={`data:image/jpeg;base64,${wsFrameBase64}`}
                 alt="ML Tracking"
                 style={{ width: '100%', height: 'auto', maxHeight: '550px', objectFit: 'contain', display: 'block' }}
               />
+            )}
 
-              {/* Badge */}
-              <div style={{
-                position: 'absolute', top: '14px', left: '14px',
-                background: isDone ? 'rgba(34,197,94,0.92)' : 'rgba(239,68,68,0.92)',
-                color: '#fff', padding: '4px 12px', borderRadius: '4px', fontSize: '0.85rem',
-                fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px',
-              }}>
-                {isDone
-                  ? <><CheckCircle2 size={14} /> DONE</>
-                  : <><div style={{ width: '8px', height: '8px', background: '#fff', borderRadius: '50%', animation: 'pulse-dot 1.5s infinite' }} /> LIVE</>
-                }
-              </div>
-
-              {/* Progress bar (only while processing a file) */}
-              {!isDone && jobId && (
-                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '5px', background: 'rgba(0,0,0,0.3)' }}>
-                  <div style={{ height: '5px', background: 'linear-gradient(90deg,#3b82f6,#06b6d4)', width: `${progress}%`, transition: 'width 0.4s ease' }} />
-                </div>
-              )}
-
-              {/* Reset */}
-              <button onClick={reset} style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-                <RefreshCw size={18} />
-              </button>
+            {/* Badge */}
+            <div style={{
+              position: 'absolute', top: '14px', left: '14px',
+              background: isDone ? 'rgba(34,197,94,0.92)' : 'rgba(239,68,68,0.92)',
+              color: '#fff', padding: '4px 12px', borderRadius: '4px', fontSize: '0.85rem',
+              fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px',
+            }}>
+              {isDone
+                ? <><CheckCircle2 size={14} /> DONE</>
+                : <><div style={{ width: '8px', height: '8px', background: '#fff', borderRadius: '50%', animation: 'pulse-dot 1.5s infinite' }} /> LIVE</>
+              }
             </div>
-          )}
+
+            {/* Progress bar (only while processing a file) */}
+            {!isDone && jobId && (
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '5px', background: 'rgba(0,0,0,0.3)' }}>
+                <div style={{ height: '5px', background: 'linear-gradient(90deg,#3b82f6,#06b6d4)', width: `${progress}%`, transition: 'width 0.4s ease' }} />
+              </div>
+            )}
+
+            {/* Reset */}
+            <button onClick={reset} style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <RefreshCw size={18} />
+            </button>
+          </div>
 
           {error && (
             <div style={{ padding: '14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', borderRadius: '10px' }}>
