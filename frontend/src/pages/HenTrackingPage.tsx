@@ -159,10 +159,23 @@ export default function HenTrackingPage() {
             const vw = videoRef.current.videoWidth
             const vh = videoRef.current.videoHeight
             if (vw && vh) {
-              canvasRef.current.width = vw
-              canvasRef.current.height = vh
-              ctx?.drawImage(videoRef.current, 0, 0, vw, vh)
-              const b64 = canvasRef.current.toDataURL('image/jpeg', 0.6)
+              // Scale down to max 640 width/height to prevent huge websocket frames
+              const maxDim = 640
+              let drawW = vw
+              let drawH = vh
+              if (vw > maxDim || vh > maxDim) {
+                if (vw > vh) {
+                  drawW = maxDim
+                  drawH = Math.round(vh * (maxDim / vw))
+                } else {
+                  drawH = maxDim
+                  drawW = Math.round(vw * (maxDim / vh))
+                }
+              }
+              canvasRef.current.width = drawW
+              canvasRef.current.height = drawH
+              ctx?.drawImage(videoRef.current, 0, 0, drawW, drawH)
+              const b64 = canvasRef.current.toDataURL('image/jpeg', 0.5) // Slightly lower quality for speed
               ws.send(b64)
             }
           }
