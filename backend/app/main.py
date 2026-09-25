@@ -30,6 +30,7 @@ from app.api.sync import router as sync_router
 from app.api.audit import router as audit_router
 from app.api.dashboard import router as dashboard_router
 from app.api.reports import router as reports_router
+from app.api.tracker import router as tracker_router
 
 # ─── App Factory ──────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -84,7 +85,7 @@ app.include_router(sync_router)
 app.include_router(audit_router)
 app.include_router(dashboard_router)
 app.include_router(reports_router)
-
+app.include_router(tracker_router)
 
 # ─── Startup ──────────────────────────────────────────────────────────────────
 @app.on_event("startup")

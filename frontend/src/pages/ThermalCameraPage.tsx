@@ -58,11 +58,17 @@ export default function ThermalCameraPage() {
         try {
           const res = await fetch(`${API_URL}/api/ai/stream-uploaded-count?path=${encodeURIComponent(tempStreamPath)}`)
           const data = await res.json()
-          setResult({ is_video: true, hen_count: data.count })
+          if (data && data.count !== undefined) {
+            setResult((prev: any) => ({
+              ...(prev || {}),
+              is_video: true,
+              hen_count: Number(data.count) || 0,
+            }))
+          }
         } catch (e) {
           console.error("Failed to fetch live count:", e)
         }
-      }, 1000)
+      }, 800)
     }
     return () => {
       if (interval) clearInterval(interval)
@@ -414,6 +420,26 @@ export default function ThermalCameraPage() {
           {result && (
             <div className="fade-in">
 
+              {/* Main Hen Count Metric Card */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '20px', padding: '20px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                <div>
+                  <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#ef4444', fontWeight: '700', marginBottom: '4px' }}>
+                    {isVideo ? '🐔 Hens Counted (Video Tracking)' : '🐔 Hens Detected (Thermal)'}
+                  </div>
+                  <div style={{ fontSize: '3rem', fontWeight: '800', color: '#ef4444', lineHeight: 1 }}>
+                    {result.hen_count ?? 0}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#ef4444', marginTop: '4px' }}>
+                    {isVideo ? 'Real-time AI Video Tracking & Detection' : 'Temperature filter: 20°C – 40°C'}
+                  </div>
+                </div>
+                <div style={{ flex: 1, textAlign: 'right', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                  {result.hens && result.hens.length > 0
+                    ? `Avg: ${(result.hens.reduce((a: number, h: any) => a + (h.temperature || 0), 0) / (result.hens.length || 1)).toFixed(1)}°C`
+                    : (Number(result.hen_count) > 0 ? `${result.hen_count} detected` : 'No hens detected in range')}
+                </div>
+              </div>
+
               {/* Final processed video at normal speed */}
               {isVideo && processedVideoUrl && (
                 <div style={{ marginBottom: '20px' }}>
@@ -433,22 +459,6 @@ export default function ThermalCameraPage() {
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '8px' }}>
                     Video plays at normal speed. Green boxes = detected hens. Count shown in top-left corner.
                   </p>
-                </div>
-              )}
-
-              {/* Image result stats */}
-              {!isVideo && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '20px', padding: '20px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)' }}>
-                  <div>
-                    <div style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px', color: '#ef4444', fontWeight: '700', marginBottom: '4px' }}>Hens Detected (Thermal)</div>
-                    <div style={{ fontSize: '2.8rem', fontWeight: '800', color: '#ef4444', lineHeight: 1 }}>{result.hen_count}</div>
-                    <div style={{ fontSize: '0.8rem', color: '#ef4444', marginTop: '4px' }}>Temperature filter: 20°C – 40°C</div>
-                  </div>
-                  <div style={{ flex: 1, textAlign: 'right', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                    {result.hen_count > 0
-                      ? `Avg: ${(result.hens?.reduce((a: number, h: any) => a + h.temperature, 0) / (result.hens?.length || 1)).toFixed(1)}°C`
-                      : 'No hens detected in range'}
-                  </div>
                 </div>
               )}
 

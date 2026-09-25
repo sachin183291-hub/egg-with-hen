@@ -531,8 +531,9 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
                 await asyncio.sleep(0.05)
                 continue
 
+            h, w = frame.shape[:2]
+            height, width = h, w
             if out is None:
-                h, w = frame.shape[:2]
                 fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                 out = cv2.VideoWriter(out_video_path, fourcc, fps, (w, h))
@@ -553,7 +554,7 @@ async def generate_thermal_stream(url: str, min_temp: float = 20.0, max_temp: fl
                     cls_id = int(box.cls[0].item())
                     raw_class_name = results[0].names.get(cls_id, "unknown").lower()
                     
-                    if "hen" not in raw_class_name and "bird" not in raw_class_name:
+                    if not any(k in raw_class_name for k in ("hen", "bird", "chicken", "animal", "poultry", "comb")):
                         continue
 
                     if box.id is not None:

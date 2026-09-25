@@ -27,33 +27,32 @@ Return a JSON object with this exact schema:
 def check_image_authenticity(image_bytes: bytes) -> Dict[str, Any]:
     try:
         from app.config import settings
-        import google.generativeai as genai
-        
+        from google import genai  # new SDK
+        from google.genai import types
+
         if not settings.GEMINI_API_KEY or len(settings.GEMINI_API_KEY.strip()) < 10:
             return {"is_screen_recapture": False, "confidence": 0.0, "reason": "No Gemini API key configured", "error": True}
-            
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        
+
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
         # Determine MIME type heuristically
         mime_type = "image/jpeg"
         if image_bytes.startswith(b'\x89PNG'):
             mime_type = "image/png"
         elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[8:12]:
             mime_type = "image/webp"
-            
-        model = genai.GenerativeModel("models/gemini-3.5-flash-lite")
-        
-        image_parts = [
-            {"mime_type": mime_type, "data": image_bytes}
-        ]
-        
-        response = model.generate_content(
-            [SYSTEM_PROMPT, image_parts[0]],
-            generation_config=genai.types.GenerationConfig(
+
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+
+        response = client.models.generate_content(
+            model="gemini-flash-lite-latest",
+            contents=[SYSTEM_PROMPT, image_part],
+            config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-            )
+                temperature=0.0,
+            ),
         )
-        
+
         raw_text = response.text.strip()
         data = json.loads(raw_text)
         is_screen = bool(data.get("is_screen_recapture", False))

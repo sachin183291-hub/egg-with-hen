@@ -21,6 +21,7 @@ const EggCounterPage = lazy(() => import('./pages/EggCounterPage'))
 const EggAIChatPage = lazy(() => import('./pages/EggAIChatPage'))
 const HenHealthPage = lazy(() => import('./pages/HenHealthPage'))
 const ThermalCameraPage = lazy(() => import('./pages/ThermalCameraPage'))
+const HenTrackingPage = lazy(() => import('./pages/HenTrackingPage'))
 const DronePage = lazy(() => import('./pages/DronePage'))
 
 const PageLoader = () => (
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/egg-ai-chat"    element={<EggAIChatPage />} />
             <Route path="/hen-health"     element={<HenHealthPage />} />
             <Route path="/thermal-camera"  element={<ThermalCameraPage />} />
+            <Route path="/video-tracking"  element={<HenTrackingPage />} />
             <Route path="/drone"           element={<DronePage />} />
             <Route path="/blockchain"      element={<BlockchainPage />} />
             <Route path="/audit-logs"      element={<AuditLogsPage />} />

@@ -83,6 +83,7 @@ export default function EggCounterPage() {
   const [yoloResult, setYoloResult] = useState<YoloResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [threshold, setThreshold] = useState(0.35)
+  const [eggCost, setEggCost] = useState<number>(0)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -370,6 +371,40 @@ export default function EggCounterPage() {
             {t(`eggCounter.target${targetOption.charAt(0).toUpperCase() + targetOption.slice(1)}` as any)}
           </button>
         ))}
+      </div>
+
+      {/* Egg Cost Input */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          background: 'var(--bg-elevated)',
+          borderRadius: 10,
+          padding: '6px 12px',
+          width: 'fit-content',
+          border: '1px solid var(--border-subtle)',
+        }}
+      >
+        <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+          Cost per Egg (₹):
+        </span>
+        <input 
+          type="number" 
+          min="0"
+          step="0.5"
+          value={eggCost || ''} 
+          onChange={(e) => setEggCost(parseFloat(e.target.value) || 0)}
+          style={{ 
+            width: '80px', 
+            padding: '4px 8px', 
+            borderRadius: '6px', 
+            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-base)',
+            color: 'var(--text-primary)'
+          }}
+          placeholder="0.00"
+        />
       </div>
       </div>
 
@@ -834,6 +869,11 @@ export default function EggCounterPage() {
                        {t('eggCounter.calculatedTrays', { count: openaiResult.tray_count })}
                      </div>
                   )}
+                  {eggCost > 0 && openaiResult.egg_count > 0 && (
+                     <div style={{ fontSize: '1.2rem', color: '#10b981', marginTop: 12, fontWeight: 700, padding: '8px', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '6px' }}>
+                       Total Cost: ₹{(openaiResult.egg_count * eggCost).toFixed(2)}
+                     </div>
+                  )}
                 </div>
                 )}
 
@@ -907,7 +947,7 @@ export default function EggCounterPage() {
                       lineHeight: 1,
                     }}
                   >
-                    {openaiResult.hen_count}
+                    {openaiResult.hen_count ?? 0}
                   </div>
                 </div>
                 )}
@@ -1133,11 +1173,16 @@ export default function EggCounterPage() {
                     {target === 'hens' ? t('eggCounter.totalHens') : (target === 'eggs' ? t('eggCounter.totalEggs') : t('eggCounter.totalTrays'))}
                   </div>
                   <div style={{ fontSize: '3rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
-                    {target === 'hens' ? yoloResult.hen_count : (target === 'eggs' ? yoloResult.egg_count : yoloResult.tray_count)}
+                    {target === 'hens' ? (yoloResult.hen_count ?? 0) : (target === 'eggs' ? (yoloResult.egg_count ?? 0) : (yoloResult.tray_count ?? 0))}
                   </div>
                   {target === 'trays' && yoloResult.egg_count !== undefined && yoloResult.egg_count > 0 && (
                     <div style={{ fontSize: '1rem', color: 'var(--brand-700)', marginTop: 8, fontWeight: 600 }}>
                       {t('eggCounter.yoloCalculatedEggs', { count: yoloResult.egg_count })}
+                    </div>
+                  )}
+                  {target !== 'hens' && yoloResult.egg_count !== undefined && yoloResult.egg_count > 0 && eggCost > 0 && (
+                    <div style={{ fontSize: '1.2rem', color: '#10b981', marginTop: 12, fontWeight: 700, padding: '8px', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderRadius: '6px', display: 'inline-block' }}>
+                      Total Cost: ₹{(yoloResult.egg_count * eggCost).toFixed(2)}
                     </div>
                   )}
                   {yoloResult.tray_count !== undefined && (

@@ -1,0 +1,166 @@
+--- MATCH ---
+<USER_REQUEST>
+website open panna whitetaa varuthuu enna nuu paruu 
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-21T12:28:52+05:30.
+</ADDITIONAL_METADATA>
+<USER_SETTINGS_CHANGE>
+The user changed setting `Model Selection` from None to Gemini 3.1 Pro (High). No need to comment on this change if the user doesn't ask about it. If reporting what model you are, please use a human readable name instead of the exact string.
+</USER_SETTINGS_CHANGE>
+
+--- MATCH ---
+<USER_REQUEST>
+IMPORTANT — CONNECT MY ACTUAL TRAINED ML MODEL TO THE WEBSITE
+
+My main requirement is NOT just to create a tracking API.
+
+I have already trained my own HEN_COMB ML model.
+
+The website MUST use that trained model for actual inference.
+
+MY TRAINED MODEL:
+
+best.pt
+
+Path:
+HEN_COMB_1280_TRAINING/hen_comb_1280_100ep/weights/best.pt
+
+This is the model that previously produced the correct HEN_COMB detection output on my poultry drone images/videos.
+
+DO NOT:
+- use a pretrained YOLO model instead
+- download another model
+- train a new model
+- create a dummy detector
+- use OpenCV color detection
+- detect green boxes from the image
+- use a fake/random count
+- hardcode the number of hens
+- simulate detection
+- replace my trained model with another model
+
+The actual best.pt MUST be loaded by the backend and used for every uploaded video.
+
+==================================================
+REQUIRED WEBSITE FLOW
+==================================================
+
+USER UPLOADS POULTRY DRONE VIDEO
+                ↓
+EXISTING WEBSITE UPLOAD BUTTON
+                ↓
+BACKEND RECEIVES VIDEO
+                ↓
+TEMPORARY VIDEO FILE
+                ↓
+LOAD MY TRAINED best.pt
+                ↓
+YOLO HEN_COMB DETECTION
+                ↓
+BYTETrack
+                ↓
+ORIGINAL STABLE HEN NUMBER TRACKING
+                ↓
+POSITION + MOTION MATCHING
+                ↓
+ONE HEN = ONE PERMANENT NUMBER
+                ↓
+LIVE HEN COUNT
+                ↓
+WEBSITE LIVE DISPLAY
+                ↓
+VIDEO FINISHES
+                ↓
+FINAL TOTAL HEN COUNT
+                ↓
+SAVE ONLY FINAL COUNT + METADATA
+                ↓
+DELETE TEMPORARY VIDEO
+
+==================================================
+MODEL REQUIREMENTS
+==================================================
+
+Use exactly:
+
+best.pt
+
+The model must be loaded using Ultralytics YOLO.
+
+Example:
+
+from ultralytics import YOLO
+
+model = YOLO(MODEL_PATH)
+
+Do NOT replace this with:
+- YOLO p
+<truncated 5645 bytes>
+==========================================
+
+Before saying the integration is complete, test with one of my real poultry drone videos.
+
+The test must prove:
+
+1. Video upload works.
+2. My best.pt loads.
+3. YOLO detects HEN_COMB.
+4. ByteTrack works.
+5. Permanent hen IDs are created.
+6. Same hen is not repeatedly counted.
+7. Live count reaches frontend.
+8. Final count is returned.
+9. Temporary video is deleted.
+10. No processed video is saved.
+
+If the model produces zero detections, DO NOT hide the problem.
+
+Show:
+
+[ML] DETECTIONS = 0
+
+and identify why.
+
+==================================================
+VERY IMPORTANT
+==================================================
+
+I do NOT want a demonstration or mock implementation.
+
+I want my ACTUAL TRAINED ML MODEL:
+
+best.pt
+
+to perform the actual poultry hen-comb detection on the uploaded website video.
+
+The website output must come from real YOLO inference + my original tracking logic.
+
+Do not claim completion until you have verified the complete:
+
+UPLOAD
+→ best.pt
+→ HEN_COMB DETECTION
+→ TRACKING
+→ LIVE COUNT
+→ FINAL COUNT
+
+pipeline.
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-21T12:42:04+05:30.
+
+The user's current state is as follows:
+Active Document: c:\Users\sachi\Downloads\giotag project\backend\app\main.py (LANGUAGE_PYTHON)
+Cursor is on line: 14
+Other open documents:
+- c:\Users\sachi\Downloads\giotag project\backend\generate_test_drawings.py (LANGUAGE_PYTHON)
+- c:\Users\sachi\Downloads\giotag project\backend\app\config.py (LANGUAGE_PYTHON)
+- c:\Users\sachi\Downloads\giotag project\backend\app\ai\detector_interface.py (LANGUAGE_PYTHON)
+- c:\Users\sachi\Downloads\giotag project\docker-compose.yml (LANGUAGE_YAML)
+- c:\Users\sachi\Downloads\giotag project\backend\tracker_app.py (LANGUAGE_PYTHON)
+Browser State:
+  Page C7B1218F65796500FD75F43521634E92 (GioTag — Secure Evidence System) - https://localhost:5173/login [ACTIVE]
+    Viewport: 1024x788, Page Height: 788
+</ADDITIONAL_METADATA>
+

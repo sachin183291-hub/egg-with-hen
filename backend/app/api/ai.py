@@ -213,7 +213,7 @@ async def count_trays(
         filtered_detections = []
         for det in result.get("detections", []):
             label = det.get("class", "").lower()
-            if target == "trays" and "tray" in label:
+            if target == "trays" and ("tray" in label or "egg" in label):
                 filtered_detections.append(det)
             elif target == "hens" and "hen" in label:
                 filtered_detections.append(det)
@@ -222,8 +222,18 @@ async def count_trays(
                 
         # Calculate counts
         if target == "trays":
-            result["tray_count"] = len(filtered_detections)
-            result["egg_count"] = result["tray_count"] * 30
+            result["tray_count"] = sum(1 for d in filtered_detections if "tray" in d.get("class", "").lower())
+            
+            # Count eggs actually detected by YOLO
+            detected_eggs = sum(1 for d in filtered_detections if "egg" in d.get("class", "").lower() and "tray" not in d.get("class", "").lower())
+            
+            # If eggs are detected individually, use that (supports tray deduction of missing eggs).
+            # Otherwise, fallback to full trays (30 eggs each).
+            if detected_eggs > 0:
+                result["egg_count"] = detected_eggs
+            else:
+                result["egg_count"] = result["tray_count"] * 30
+                
             result["hen_count"] = 0
         elif target == "hens":
             result["hen_count"] = len(filtered_detections)

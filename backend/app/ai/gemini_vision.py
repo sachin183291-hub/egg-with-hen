@@ -1,8 +1,8 @@
 """
 Gemini Vision Detector — egg & tray counting via Google Gemini AI.
 
-This implements the ImageDetector interface using the free Gemini API
-as a replacement for OpenAI.
+This implements the ImageDetector interface using the Gemini API
+via the new `google-genai` SDK (replaces deprecated `google-generativeai`).
 """
 import json
 import logging
@@ -17,12 +17,15 @@ class GeminiVisionDetector(ImageDetector):
     """
     Egg & tray counter using Google Gemini Vision API.
     Implements the ImageDetector interface for drop-in replacement.
+    Uses the new `google-genai` SDK (google.genai).
     """
+
+    MODEL_NAME = "gemini-flash-lite-latest"
 
     def __init__(self) -> None:
         from app.config import settings
-        # pyrefly: ignore [missing-import]
-        import google.generativeai as genai
+        from google import genai  # new SDK
+        from google.genai import types
 
         if not settings.GEMINI_API_KEY:
             raise RuntimeError(
@@ -30,21 +33,14 @@ class GeminiVisionDetector(ImageDetector):
                 "Add it to backend/.env: GEMINI_API_KEY=your-gemini-key"
             )
 
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self._model = genai.GenerativeModel('gemini-flash-lite-latest')
+        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self._types = types
 
     def analyze(self, image_bytes: bytes, mime_type: str = "image/jpeg", target: str = "trays") -> dict:
         """
         Send the image to Gemini and return a structured count result.
         """
         try:
-            image_parts = [
-                {
-                    "mime_type": mime_type,
-                    "data": image_bytes
-                }
-            ]
-            
             target_str = "eggs, egg trays, and hens"
             if target == "eggs":
                 target_str = "ONLY eggs (count all real physical eggs AND all hand-drawn ovals/circles/egg sketches accurately into egg_count)"
@@ -52,7 +48,7 @@ class GeminiVisionDetector(ImageDetector):
                 target_str = "ONLY hens/chickens (count all real live hens/chickens AND all hand-drawn chicken doodles/cartoons/sketches accurately into hen_count)"
             elif target == "trays":
                 target_str = "ONLY egg trays (count all real egg trays, stack layers, AND all hand-drawn tray grids/matrices/cartons accurately into tray_count)"
-                
+
             prompt = (
                 f"{SYSTEM_INSTRUCTION}\n\n"
                 "Please analyze this image carefully.\n"
@@ -60,10 +56,13 @@ class GeminiVisionDetector(ImageDetector):
                 "Count both real physical objects and any hand-drawn/synthetic test shapes accurately.\n"
                 "Return your answer as the JSON object described in the instructions with exact integer values for egg_count, tray_count, and hen_count."
             )
-            
-            response = self._model.generate_content(
-                [prompt, image_parts[0]],
-                generation_config={"temperature": 0.0}
+
+            image_part = self._types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+
+            response = self._client.models.generate_content(
+                model=self.MODEL_NAME,
+                contents=[prompt, image_part],
+                config=self._types.GenerateContentConfig(temperature=0.0),
             )
 
             raw_text = response.text.strip()
@@ -79,23 +78,21 @@ class GeminiVisionDetector(ImageDetector):
         """
         Answer a user question about an image (conversational mode) using Gemini.
         """
-        content = [CHAT_SYSTEM_INSTRUCTION, message]
+        contents: list = [CHAT_SYSTEM_INSTRUCTION, message]
 
         if image_bytes:
-            content.append({
-                "mime_type": mime_type,
-                "data": image_bytes
-            })
+            contents.append(self._types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
 
         try:
-            response = self._model.generate_content(
-                content,
-                generation_config={"temperature": 0.3}
+            response = self._client.models.generate_content(
+                model=self.MODEL_NAME,
+                contents=contents,
+                config=self._types.GenerateContentConfig(temperature=0.3),
             )
 
             reply_text = response.text.strip()
 
-            # If image was provided, also run a full structured analysis in parallel
+            # If image was provided, also run a full structured analysis
             analysis = None
             if image_bytes:
                 try:
@@ -114,17 +111,6 @@ class GeminiVisionDetector(ImageDetector):
         Analyze dual images (top view and side view) to count trays.
         """
         try:
-            image_parts = [
-                {
-                    "mime_type": mime_type_top,
-                    "data": top_image_bytes
-                },
-                {
-                    "mime_type": mime_type_side,
-                    "data": side_image_bytes
-                }
-            ]
-            
             prompt = (
                 f"{SYSTEM_INSTRUCTION}\n\n"
                 "You are provided with TWO images. One is a TOP VIEW, and the other is a SIDE VIEW. You must determine which is which based on their content.\n"
@@ -136,10 +122,14 @@ class GeminiVisionDetector(ImageDetector):
                 "Count both real physical objects and any hand-drawn/synthetic test shapes accurately. DO NOT guess the tray count. Calculate carefully.\n"
                 "Return your answer as the JSON object described in the instructions with exact integer values for egg_count, tray_count, and hen_count."
             )
-            
-            response = self._model.generate_content(
-                [prompt, image_parts[0], image_parts[1]],
-                generation_config={"temperature": 0.0}
+
+            top_part = self._types.Part.from_bytes(data=top_image_bytes, mime_type=mime_type_top)
+            side_part = self._types.Part.from_bytes(data=side_image_bytes, mime_type=mime_type_side)
+
+            response = self._client.models.generate_content(
+                model=self.MODEL_NAME,
+                contents=[prompt, top_part, side_part],
+                config=self._types.GenerateContentConfig(temperature=0.0),
             )
 
             raw_text = response.text.strip()

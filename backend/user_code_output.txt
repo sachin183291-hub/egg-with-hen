@@ -1,0 +1,148 @@
+--- FOUND CODE IN USER INPUT ---
+IMPORTANT — CONNECT MY ACTUAL TRAINED ML MODEL TO THE WEBSITE
+
+My main requirement is NOT just to create a tracking API.
+
+I have already trained my own HEN_COMB ML model.
+
+The website MUST use that trained model for actual inference.
+
+MY TRAINED MODEL:
+
+best.pt
+
+Path:
+HEN_COMB_1280_TRAINING/hen_comb_1280_100ep/weights/best.pt
+
+This is the model that previously produced the correct HEN_COMB detection output on my poultry drone images/videos.
+
+DO NOT:
+- use a pretrained YOLO model instead
+- download another model
+- train a new model
+- create a dummy detector
+- use OpenCV color detection
+- detect green boxes from the image
+- use a fake/random count
+- hardcode the number of hens
+- simulate detection
+- replace my trained model with another model
+
+The actual best.pt MUST be loaded by the backend and used for every uploaded video.
+
+==================================================
+REQUIRED WEBSITE FLOW
+==================================================
+
+USER UPLOADS POULTRY DRONE VIDEO
+                ↓
+EXISTING WEBSITE UPLOAD BUTTON
+                ↓
+BACKEND RECEIVES VIDEO
+                ↓
+TEMPORARY VIDEO FILE
+                ↓
+LOAD MY TRAINED best.pt
+                ↓
+YOLO HEN_COMB DETECTION
+                ↓
+BYTETrack
+                ↓
+ORIGINAL STABLE HEN NUMBER TRACKING
+                ↓
+POSITION + MOTION MATCHING
+                ↓
+ONE HEN = ONE PERMANENT NUMBER
+                ↓
+LIVE HEN COUNT
+                ↓
+WEBSITE LIVE DISPLAY
+                ↓
+VIDEO FINISHES
+                ↓
+FINAL TOTAL HEN COUNT
+                ↓
+SAVE ONLY FINAL COUNT + METADATA
+                ↓
+DELETE TEMPORARY VIDEO
+
+==================================================
+MODEL REQUIREMENTS
+==================================================
+
+Use exactly:
+
+best.pt
+
+The model must be loaded using Ultralytics YOLO.
+
+Example:
+
+from ultralytics import YOLO
+
+model = YOLO(MODEL_PATH)
+
+Do NOT replace this with:
+- YOLO p
+<truncated 5645 bytes>
+==========================================
+
+Before saying the integration is complete, test with one of my real poultry drone videos.
+
+The test must prove:
+
+1. Video upload works.
+2. My best.pt loads.
+3. YOLO detects HEN_COMB.
+4. ByteTrack works.
+5. Permanent hen IDs are created.
+6. Same hen is not repeatedly counted.
+7. Live count reaches frontend.
+8. Final count is returned.
+9. Temporary video is deleted.
+10. No processed video is saved.
+
+If the model produces zero detections, DO NOT hide the problem.
+
+Show:
+
+[ML] DETECTIONS = 0
+
+and identify why.
+
+==================================================
+VERY IMPORTANT
+==================================================
+
+I do NOT want a demonstration or mock implementation.
+
+I want my ACTUAL TRAINED ML MODEL:
+
+best.pt
+
+to perform the actual poultry hen-comb detection on the uploaded website video.
+
+The website output must come from real YOLO inference + my original tracking logic.
+
+Do not claim completion until you have verified the complete:
+
+UPLOAD
+→ best.pt
+→ HEN_COMB DETECTION
+→ TRACKING
+→ LIVE COUNT
+→ FINAL COUNT
+
+pipeline.
+
+--- FOUND CODE IN USER INPUT ---
+Itha eppadi fix pandrathu? Neenga unga Windows Security / Antivirus settings-la poyi, C:\Users\sachi\Downloads\giotag project\backend\.venv\Lib\site-packages\lap\ folder-ah exception/whitelist-la add pannanum. Illana Python-ku full permission kudukanum. Itha pannita, full pipeline pakka-va work aagum!
+
+etyhaa epudii nuu theelivaa sllu correct ta enhaku
+
+--- FOUND CODE IN USER INPUT ---
+naa enthaa vedio athula uplaod paanum anthaa box anthaa vedio laa fix aganum naa oruu code kuduthu irupen athu use panni correct taa box potu enkau right side la cout varamarii pannaum naa kudutha ML laa vehci
+
+--- FOUND CODE IN USER INPUT ---
+broo ethu epudii naa kekuren na upload panna udaneyy left side laa vedio naa run panuven athulaiye etha box concept taa vechi anthaa count taa engaa right side laa contnuew vaa live vaa poduu corerect taa anthaa vedio evolo sec or min laa irukoo athaa than output kuu eudkuaraa time ma irukanum  anthaa mairi pannu correct taa ethaa fix panni
+

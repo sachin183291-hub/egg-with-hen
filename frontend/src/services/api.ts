@@ -139,3 +139,9 @@ export const reportsApi = {
   suspicious: () => api.get('/api/reports/suspicious'),
   activity: (days = 30) => api.get(`/api/reports/activity?days=${days}`),
 }
+
+// ─── Tracker ──────────────────────────────────────────────────────────────────
+export const trackerApi = {
+  upload: (formData: FormData) => api.post('/api/tracker/upload', formData, { timeout: 60000 }),
+  result: (jobId: string) => api.get(`/api/tracker/result/${jobId}`),
+}

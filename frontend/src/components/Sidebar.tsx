@@ -5,7 +5,7 @@ import { getInitials } from '../utils/helpers'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Map, Image, Users, Cpu, Blocks,
-  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse, Thermometer, Plane
+  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse, Thermometer, Plane, Layers
 } from 'lucide-react'
 
 const navItems = [
@@ -25,6 +25,7 @@ const navItems = [
     { to: '/egg-ai-chat', label: 'AI Vision Chat', icon: MessageCircle },
     { to: '/hen-health', label: 'Hen Health', icon: HeartPulse },
     { to: '/thermal-camera', label: 'Thermal Camera', icon: Thermometer },
+    { to: '/video-tracking', label: 'Video Tracking', icon: Layers },
     { to: '/blockchain', label: 'Blockchain', icon: Blocks, hideFromRestricted: true },
   ]},
   { group: 'Records', items: [
