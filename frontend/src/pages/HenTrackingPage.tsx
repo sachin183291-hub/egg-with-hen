@@ -195,6 +195,7 @@ export default function HenTrackingPage() {
     } catch (err: any) {
       setCameraError('Failed to access camera: ' + err.message)
       setIsProcessing(false)
+      setIsLiveMode(false)
     }
   }
 
