@@ -155,15 +155,17 @@ export default function HenTrackingPage() {
 
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
+      const isWaitingRef = { current: false }
 
       ws.onopen = () => {
         liveIntervalRef.current = window.setInterval(() => {
           if (videoRef.current && canvasRef.current && ws.readyState === WebSocket.OPEN) {
+            if (isWaitingRef.current) return // Prevent lag buildup!
+
             const ctx = canvasRef.current.getContext('2d')
             const vw = videoRef.current.videoWidth
             const vh = videoRef.current.videoHeight
             if (vw && vh) {
-              // Scale down to max 640 width/height to prevent huge websocket frames
               const maxDim = 640
               let drawW = vw
               let drawH = vh
@@ -179,16 +181,20 @@ export default function HenTrackingPage() {
               canvasRef.current.width = drawW
               canvasRef.current.height = drawH
               ctx?.drawImage(videoRef.current, 0, 0, drawW, drawH)
-              const b64 = canvasRef.current.toDataURL('image/jpeg', 0.5) // Slightly lower quality for speed
+              const b64 = canvasRef.current.toDataURL('image/jpeg', 0.5) 
+              
+              isWaitingRef.current = true
               ws.send(b64)
             }
           }
-        }, 200) // 5 FPS
+        }, 80) // Fast 12.5 FPS base interval, but throttled by backend speed
       }
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
+          isWaitingRef.current = false // Ready for next frame
+          
           if (data.frame) setWsFrameBase64(data.frame)
           if (data.visible_hens !== undefined) {
              setVisibleHens(Number(data.visible_hens))
