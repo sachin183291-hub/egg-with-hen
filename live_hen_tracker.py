@@ -116,7 +116,7 @@ class LiveHenTracker:
 
 if __name__ == "__main__":
     # --- IMPORTANT ---
-    # 1. model_path = 'your_trained_model.pt' (Replace with your actual custom trained model path)
+    # 1. model_path = 'backend/best.pt' (Your custom trained model)
     # 2. video_source = 0 (for webcam) OR 'test.mp4' (for a saved video)
-    tracker = LiveHenTracker(model_path='yolov8n.pt', video_source=0)
+    tracker = LiveHenTracker(model_path='backend/best.pt', video_source=0)
     tracker.run()
