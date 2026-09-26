@@ -671,7 +671,15 @@ class StableHenTracker:
         _, buffer = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
         b64 = base64.b64encode(buffer.tobytes()).decode("utf-8")
 
-        return b64, visible_count, self.next_hen_number - 1
+        # Format detections for JSON
+        formatted_detections = []
+        for det in detections:
+            formatted_detections.append({
+                "box": det["box"],
+                "hen_number": det["hen_number"]
+            })
+
+        return b64, visible_count, self.next_hen_number - 1, formatted_detections
 
     # ========================================================
     # PROCESS AND SAVE  (Solution 1 – Process First, Play Later)

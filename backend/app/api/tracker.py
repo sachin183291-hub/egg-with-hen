@@ -196,12 +196,15 @@ async def ws_live_tracking(websocket: WebSocket):
                 continue
 
             frame_no += 1
-            b64, vis_count, tot_count = tracker.process_frame(frame, frame_no, fps=5.0)
+            b64, vis_count, tot_count, detections = tracker.process_frame(frame, frame_no, fps=5.0)
 
             await websocket.send_json({
-                "frame": b64,
+                # We no longer need to send back the large base64 image if we do client-side rendering,
+                # but we'll send it as fallback if needed, or just send detections.
+                "frame": b64, 
                 "visible_hens": vis_count,
-                "total_hens": tot_count
+                "total_hens": tot_count,
+                "detections": detections
             })
             await asyncio.sleep(0)
 
