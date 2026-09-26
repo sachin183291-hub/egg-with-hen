@@ -40,7 +40,7 @@ class LiveHenTracker:
             # Run YOLO tracking in the background
             # persist=True enables object tracking (ByteTrack/BoT-SORT) 
             # which assigns consistent IDs across frames even when the camera moves.
-            results = self.model.track(frame, persist=True, verbose=False)
+            results = self.model.track(frame, persist=True, verbose=False, conf=0.25)
             
             # Update unique IDs based on tracker output
             if results and len(results) > 0 and results[0].boxes and results[0].boxes.id is not None:
@@ -76,9 +76,23 @@ class LiveHenTracker:
                 
             # Draw results on the CURRENT frame
             display_frame = frame.copy()
-            if results is not None:
-                # Plot the bounding boxes and tracking IDs
-                display_frame = results.plot(img=display_frame)
+            if results is not None and results.boxes is not None:
+                for box in results.boxes:
+                    # Filter for specific classes if using generic yolov8n (Class 14 is 'bird' in COCO)
+                    # If you use your trained model, you can remove this check or adjust class IDs
+                    cls_id = int(box.cls[0])
+                    
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    track_id = int(box.id[0]) if box.id is not None else -1
+                    conf = float(box.conf[0])
+                    
+                    # Draw Bounding Box
+                    cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                    
+                    # Label text
+                    label = f"Hen {track_id}" if track_id != -1 else "Hen"
+                    cv2.putText(display_frame, label, (x1, y1 - 10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
                 
             # Display Live Unique Hen Count
             count_text = f"Live Unique Hen Count: {len(self.unique_hen_ids)}"
