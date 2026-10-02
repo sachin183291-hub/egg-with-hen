@@ -3,14 +3,15 @@ import uuid
 import threading
 import queue
 import asyncio
-from fastapi import APIRouter, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 import tempfile
 
-from app.ai.high_recall_tracker import HighRecallHenTracker
+from app.ai.optical_tracker import OpticalHenTracker
 
 router = APIRouter(prefix="/api/tracker", tags=["Hen Tracking"])
 
 TRACKING_JOBS = {}
+global_live_tracker = None
 
 
 import numpy as np
@@ -36,205 +37,31 @@ def get_model_path():
             return p
     return "yolov8n.pt"
 
+@router.post("/live_frame")
+async def live_frame(
+    frame: UploadFile = File(...),
+    frame_number: int = Form(0),
+    video_time: float = Form(0.0)
+):
+    global global_live_tracker
+    if global_live_tracker is None:
+        model_path = get_model_path()
+        global_live_tracker = OpticalHenTracker(model_path)
+        
+    raw = await frame.read()
+    np_arr = np.frombuffer(raw, np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    
+    if img is None:
+        return {"success": False, "error": "Cannot decode frame"}
+        
+    result = global_live_tracker.process_live_frame(img, frame_number, video_time)
+    return result
 
-@router.post("/upload")
-async def upload_video(file: UploadFile = File(...)):
-    """Upload video → get job_id. WebSocket will start streaming annotated frames."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file uploaded")
+@router.post("/reset")
+async def reset_tracking():
+    global global_live_tracker
+    if global_live_tracker is not None:
+        global_live_tracker.reset_state()
+    return {"success": True}
 
-    model_path = get_model_path()
-    if not os.path.exists(model_path):
-        raise HTTPException(status_code=500, detail="Model file best.pt not found.")
-
-    temp_dir = None
-    if os.path.exists("D:\\"):
-        temp_dir = "D:\\giotag_temp"
-        os.makedirs(temp_dir, exist_ok=True)
-
-    ext = os.path.splitext(file.filename)[1] or ".mp4"
-    fd, input_path = tempfile.mkstemp(suffix=ext, prefix="track_in_", dir=temp_dir)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(await file.read())
-    except Exception as e:
-        if os.path.exists(input_path):
-            os.remove(input_path)
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-
-    job_id = str(uuid.uuid4())
-    TRACKING_JOBS[job_id] = {
-        "status": "ready",
-        "video_path": input_path,
-        "model_path": model_path,
-        "visible_hens": 0,
-        "total_hens": 0,
-        "progress": 0,
-    }
-    return {"job_id": job_id, "status": "ready"}
-
-
-@router.websocket("/ws_stream/{job_id}")
-async def ws_stream_tracking_video(websocket: WebSocket, job_id: str):
-    await websocket.accept()
-
-    job = TRACKING_JOBS.get(job_id)
-    if not job:
-        await websocket.close(code=1008, reason="Job not found")
-        return
-
-    video_path = job.get("video_path")
-    model_path = job.get("model_path")
-
-    if not video_path or not os.path.exists(video_path):
-        await websocket.close(code=1008, reason="Video file not found")
-        return
-    if not os.path.exists(model_path):
-        await websocket.close(code=1011, reason="Model not found")
-        return
-
-    job["status"] = "processing"
-
-    frame_queue: queue.Queue = queue.Queue()
-    tracker = HighRecallHenTracker(model_path=model_path)
-
-    def producer():
-        try:
-            tracker.process_to_queue(video_path, frame_queue, job)
-        except Exception as e:
-            print(f"[Tracker] Producer error: {e}")
-            import traceback; traceback.print_exc()
-            frame_queue.put(None)
-
-    t = threading.Thread(target=producer, daemon=True)
-    t.start()
-
-    loop = asyncio.get_event_loop()
-
-    try:
-        while True:
-            try:
-                item = await asyncio.wait_for(
-                    loop.run_in_executor(None, lambda: frame_queue.get(timeout=30)),
-                    timeout=35,
-                )
-            except (asyncio.TimeoutError, Exception):
-                break
-
-            if item is None:
-                break
-
-            await websocket.send_json(item)
-
-            await asyncio.sleep(0)
-
-        # Send final total hens and completion state
-        final_total = job.get("total_hens", 0)
-        try:
-            await websocket.send_json({
-                "done": True,
-                "progress": 100,
-                "visible_hens": 0,
-                "total_hens": final_total,
-            })
-            await asyncio.sleep(0.05)
-        except Exception:
-            pass
-
-        await websocket.close(code=1000)
-        job["status"] = "done"
-
-    except WebSocketDisconnect:
-        print(f"[Tracker] Client disconnected from {job_id}")
-    except Exception as e:
-        print(f"[Tracker] WS error: {e}")
-        try:
-            await websocket.close(code=1011)
-        except Exception:
-            pass
-    finally:
-        try:
-            if os.path.exists(video_path):
-                os.remove(video_path)
-        except Exception:
-            pass
-
-
-@router.get("/progress/{job_id}")
-async def get_progress(job_id: str):
-    job = TRACKING_JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return {
-        "status":       job.get("status"),
-        "progress":     job.get("progress", 0),
-        "total_hens":   job.get("total_hens", 0),
-    }
-
-@router.websocket("/ws_live")
-async def ws_live_tracking(websocket: WebSocket):
-    await websocket.accept()
-    model_path = get_model_path()
-    if not os.path.exists(model_path):
-        await websocket.close(code=1011, reason="Model not found")
-        return
-
-    tracker = HighRecallHenTracker(model_path=model_path)
-    frame_no = 0
-
-    try:
-        while True:
-            # Receive base64 image or json from client
-            raw_data = await websocket.receive_text()
-            
-            video_time = None
-            if raw_data.startswith("{"):
-                try:
-                    payload = json.loads(raw_data)
-                    data = payload.get("frame", "")
-                    video_time = payload.get("video_time")
-                    frame_no = payload.get("frame_number", frame_no + 1)
-                except:
-                    data = raw_data
-            else:
-                data = raw_data
-                frame_no += 1
-
-            if data.startswith("data:image"):
-                data = data.split(",")[1]
-            
-            try:
-                img_data = base64.b64decode(data)
-                np_arr = np.frombuffer(img_data, np.uint8)
-                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            except Exception as e:
-                print(f"[Tracker] Base64 decoding failed: {e}")
-                continue
-
-            if frame is None:
-                print("[Tracker] Frame is None")
-                continue
-
-            try:
-                b64, vis_count, tot_count, detections = tracker.process_frame(frame, frame_no, fps=5.0, video_time=video_time)
-            except Exception as e:
-                print(f"[Tracker] process_frame error: {e}")
-                import traceback; traceback.print_exc()
-                continue
-
-            await websocket.send_json({
-                "video_time": video_time,
-                "visible_hens": vis_count,
-                "total_hens": tot_count,
-                "detections": detections
-            })
-            await asyncio.sleep(0)
-
-    except WebSocketDisconnect:
-        print("[Tracker] Live client disconnected")
-    except Exception as e:
-        print(f"[Tracker] Live WS error: {e}")
-        try:
-            await websocket.close(code=1011)
-        except:
-            pass

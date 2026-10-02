@@ -62,39 +62,13 @@ export default function HenTrackingPage() {
     }
   }
 
-  const connectWs = (): Promise<WebSocket> => {
-    return new Promise((resolve, reject) => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        resolve(wsRef.current)
-        return
-      }
+  const resetAIBackend = async () => {
+    try {
       const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-      let wsUrl = ''
-      if (apiUrl) {
-        wsUrl = `${apiUrl.replace(/^http/, 'ws')}/api/tracker/ws_live`
-      } else {
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        wsUrl = `${wsProtocol}//${window.location.host}/api/tracker/ws_live`
-      }
-      
-      const ws = new WebSocket(wsUrl)
-      ws.onopen = () => {
-        wsRef.current = ws
-        resolve(ws)
-      }
-      ws.onerror = (e) => reject(e)
-      ws.onmessage = (event) => {
-        sendingRef.current = false
-        try {
-          const data = JSON.parse(event.data)
-          if (data.total_hens !== undefined) updateResults(data)
-        } catch (e) {}
-      }
-      ws.onclose = () => {
-        wsRef.current = null
-      }
-    })
+      await fetch(`${apiUrl}/api/tracker/reset`, { method: 'POST' })
+    } catch (e) {}
   }
+
 
   const contentRect = () => {
     const video = videoRef.current
@@ -125,7 +99,7 @@ export default function HenTrackingPage() {
     setStatusText('Loading video locally...')
     
     try {
-      await connectWs()
+      await resetAIBackend()
       
       const url = URL.createObjectURL(file)
       if (videoRef.current) {
@@ -156,7 +130,7 @@ export default function HenTrackingPage() {
     setIsLiveMode(true)
     setStatusText('📷 Opening Camera...')
     try {
-      await connectWs()
+      await resetAIBackend()
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
       streamRef.current = stream
       if (videoRef.current) {
@@ -204,6 +178,7 @@ export default function HenTrackingPage() {
   const resetAI = () => {
     stopCamera()
     resetLocal()
+    resetAIBackend()
     setStatusText('🔄 Reset complete.')
   }
 
@@ -232,13 +207,9 @@ export default function HenTrackingPage() {
   const sendFrame = async (number: number) => {
     const video = videoRef.current
     const capture = captureRef.current
-    if (sendingRef.current || !video || !video.videoWidth || !capture || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    if (sendingRef.current || !video || !video.videoWidth || !capture) return
 
     sendingRef.current = true
-    if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current)
-    sendTimeoutRef.current = window.setTimeout(() => {
-      sendingRef.current = false
-    }, 2000)
 
     try {
       capture.width = video.videoWidth
@@ -246,15 +217,29 @@ export default function HenTrackingPage() {
       const ctx = capture.getContext('2d')
       ctx?.drawImage(video, 0, 0, capture.width, capture.height)
       
-      const b64 = capture.toDataURL('image/jpeg', 0.6)
-      const payload = {
-        frame: b64,
-        frame_number: number,
-        video_time: video.currentTime || 0
+      const blob = await new Promise<Blob | null>(resolve => capture.toBlob(resolve, 'image/jpeg', 0.82))
+      if (!blob) {
+        sendingRef.current = false
+        return
       }
-      wsRef.current.send(JSON.stringify(payload))
+
+      const form = new FormData()
+      form.append('frame', blob, 'frame.jpg')
+      form.append('frame_number', String(number))
+      form.append('video_time', String(video.currentTime || 0))
+
+      const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+      const response = await fetch(`${apiUrl}/api/tracker/live_frame`, {
+        method: 'POST',
+        body: form
+      })
+      const data = await response.json()
+      if (data.success) {
+        updateResults(data)
+      }
     } catch (e) {
       console.warn(e)
+    } finally {
       sendingRef.current = false
     }
   }
