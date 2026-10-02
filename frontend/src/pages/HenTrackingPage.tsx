@@ -384,6 +384,19 @@ export default function HenTrackingPage() {
               <RefreshCw size={18} />
             </button>
           </div>
+
+          {(hasVideoUrl || isCameraOpen) && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
+              <button 
+                onClick={resetAI} 
+                style={{ background: '#ef4444', color: '#fff', padding: '12px 32px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', cursor: 'pointer', display: 'flex', gap: '8px', alignItems: 'center' }}
+              >
+                <RefreshCw size={20} />
+                Stop Tracking
+              </button>
+            </div>
+          )}
+
           <div style={{ padding: '14px', background: 'rgba(34,197,94,0.1)', color: '#22c55e', borderRadius: '10px' }}>
             {statusText}
           </div>

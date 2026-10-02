@@ -12,7 +12,7 @@ class OpticalHenTracker:
     def __init__(self, model_path):
         self.MODEL_PATH = model_path
         self.DEVICE = 0 if torch.cuda.is_available() else "cpu"
-        self.IMG_SIZE = 1280 if self.DEVICE != "cpu" else 640
+        self.IMG_SIZE = 640
         self.USE_HALF = True if self.DEVICE != "cpu" else False
         
         print(f"Loading YOLO model from {model_path} on {self.DEVICE}...")
