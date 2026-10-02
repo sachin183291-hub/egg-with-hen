@@ -16,6 +16,7 @@ TRACKING_JOBS = {}
 import numpy as np
 import cv2
 import base64
+import json
 
 def get_model_path():
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
@@ -184,24 +185,38 @@ async def ws_live_tracking(websocket: WebSocket):
     try:
         while True:
             # Receive base64 image or json from client
-            data = await websocket.receive_text()
+            raw_data = await websocket.receive_text()
+            
+            video_time = None
+            if raw_data.startswith("{"):
+                try:
+                    payload = json.loads(raw_data)
+                    data = payload.get("frame", "")
+                    video_time = payload.get("video_time")
+                    frame_no = payload.get("frame_number", frame_no + 1)
+                except:
+                    data = raw_data
+            else:
+                data = raw_data
+                frame_no += 1
+
             if data.startswith("data:image"):
                 data = data.split(",")[1]
             
-            img_data = base64.b64decode(data)
-            np_arr = np.frombuffer(img_data, np.uint8)
-            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            try:
+                img_data = base64.b64decode(data)
+                np_arr = np.frombuffer(img_data, np.uint8)
+                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            except:
+                continue
 
             if frame is None:
                 continue
 
-            frame_no += 1
-            b64, vis_count, tot_count, detections = tracker.process_frame(frame, frame_no, fps=5.0)
+            b64, vis_count, tot_count, detections = tracker.process_frame(frame, frame_no, fps=5.0, video_time=video_time)
 
             await websocket.send_json({
-                # We no longer need to send back the large base64 image if we do client-side rendering,
-                # but we'll send it as fallback if needed, or just send detections.
-                "frame": b64, 
+                "video_time": video_time,
                 "visible_hens": vis_count,
                 "total_hens": tot_count,
                 "detections": detections

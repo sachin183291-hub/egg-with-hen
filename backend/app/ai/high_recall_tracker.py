@@ -347,14 +347,15 @@ class HighRecallHenTracker:
             cap.release()
             frame_queue.put(None)
 
-    def process_frame(self, frame, frame_no=1, fps=30.0):
+    def process_frame(self, frame, frame_no=1, fps=30.0, video_time=None):
         self.video_fps = fps
         self.video_width = frame.shape[1]
         self.video_height = frame.shape[0]
-        video_time = frame_no / self.video_fps
+        if video_time is None:
+            video_time = frame_no / self.video_fps
         detections = self.detect_frame(frame, frame_no, video_time)
         annotated, visible_count = self.draw_results(frame, detections, frame_no, video_time)
         _, buffer = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
         b64 = base64.b64encode(buffer.tobytes()).decode("utf-8")
-        formatted_detections = [{"box": d["box"], "hen_number": d["hen_number"]} for d in detections]
+        formatted_detections = [{"box": d["box"], "hen_number": d["hen_number"], "predicted": d["predicted"]} for d in detections]
         return b64, visible_count, len(self.hens), formatted_detections

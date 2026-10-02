@@ -1,246 +1,354 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, UploadCloud, Video, RefreshCw, Layers, CheckCircle2 } from 'lucide-react'
-import { trackerApi } from '../services/api'
-import toast from 'react-hot-toast'
+import { Activity, UploadCloud, Video, RefreshCw, Layers } from 'lucide-react'
 
 export default function HenTrackingPage() {
-  const [jobId, setJobId]                   = useState<string | null>(null)
-  const [isProcessing, setIsProcessing]     = useState(false)
-  const [isDone, setIsDone]                 = useState(false)
-  const [wsFrameBase64, setWsFrameBase64]   = useState<string | null>(null)
-  const [visibleHens, setVisibleHens]       = useState(0)
-  const [totalHens, setTotalHens]           = useState(0)
-  const [finalTotal, setFinalTotal]         = useState<number | null>(null)
-  const [progress, setProgress]             = useState(0)
-  const [error, setError]                   = useState<string | null>(null)
+  const [totalHens, setTotalHens] = useState(0)
+  const [visibleHens, setVisibleHens] = useState(0)
+  const [statusText, setStatusText] = useState('Select a video or start camera.')
   
-  const [isLiveMode, setIsLiveMode]         = useState(false)
-  const [isCameraOpen, setIsCameraOpen]     = useState(false)
-  const [cameraError, setCameraError]       = useState<string | null>(null)
+  const [isLiveMode, setIsLiveMode] = useState(false)
+  const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [hasVideoUrl, setHasVideoUrl] = useState(false)
 
-  const wsRef = useRef<WebSocket | null>(null)
-  const latestTotalRef = useRef<number>(0)
-  const latestVisibleRef = useRef<number>(0)
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const liveIntervalRef = useRef<number | null>(null)
+  const overlayRef = useRef<HTMLCanvasElement | null>(null)
+  const captureRef = useRef<HTMLCanvasElement | null>(null)
+  
+  const wsRef = useRef<WebSocket | null>(null)
+  
+  const runningRef = useRef(false)
+  const sendingRef = useRef(false)
+  const streamRef = useRef<MediaStream | null>(null)
+  const animationIdRef = useRef<number | null>(null)
+  const frameNumberRef = useRef(0)
+  const lastSendRef = useRef(0)
+  
+  const latestResultsRef = useRef<any[]>([])
+  const latestResultTimeRef = useRef(0)
+  const previousRef = useRef<any>({})
+  const velocitiesRef = useRef<any>({})
+  
+  const SEND_FPS = 12
 
-  useEffect(() => { return () => { wsRef.current?.close() } }, [])
-
-  const reset = () => {
-    if (liveIntervalRef.current) clearInterval(liveIntervalRef.current)
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream
-      stream.getTracks().forEach(t => t.stop())
-      videoRef.current.srcObject = null
+  useEffect(() => {
+    captureRef.current = document.createElement('canvas')
+    
+    const handleResize = () => {
+      if (videoRef.current && overlayRef.current) {
+        overlayRef.current.width = videoRef.current.clientWidth
+        overlayRef.current.height = videoRef.current.clientHeight
+      }
     }
-    wsRef.current?.close()
-    wsRef.current = null
-    latestTotalRef.current = 0
-    latestVisibleRef.current = 0
-    setJobId(null)
-    setIsProcessing(false)
-    setIsDone(false)
-    setWsFrameBase64(null)
-    setVisibleHens(0)
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      stopCamera()
+    }
+  }, [])
+
+  const resetLocal = () => {
+    latestResultsRef.current = []
+    latestResultTimeRef.current = 0
+    previousRef.current = {}
+    velocitiesRef.current = {}
+    frameNumberRef.current = 0
+    lastSendRef.current = 0
     setTotalHens(0)
-    setFinalTotal(null)
-    setProgress(0)
-    setError(null)
-    setIsLiveMode(false)
-    setIsCameraOpen(false)
-    setCameraError(null)
-  }
-
-  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    if (!file.type.includes('video') && !file.name.match(/\.(mp4|avi|mov|webm)$/i)) {
-      toast.error('Please upload a valid video file.')
-      return
-    }
-
-    reset()
-    setIsProcessing(true)
-
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const response = await trackerApi.upload(formData)
-      const { job_id } = response.data
-      setJobId(job_id)
-
-      // WebSocket — backend streams annotated frames at exactly video FPS
-      let wsUrl: string
-      const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-      if (apiUrl) {
-        const cleanUrl = apiUrl.replace(/^http/, 'ws')
-        wsUrl = `${cleanUrl}/api/tracker/ws_stream/${job_id}`
-      } else {
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        wsUrl = `${wsProtocol}//${window.location.host}/api/tracker/ws_stream/${job_id}`
-      }
-
-      const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.frame) setWsFrameBase64(data.frame)
-          if (data.visible_hens !== undefined) {
-            const vis = Number(data.visible_hens)
-            setVisibleHens(vis)
-            latestVisibleRef.current = vis
-          }
-          if (data.total_hens !== undefined) {
-            const tot = Number(data.total_hens)
-            setTotalHens(tot)
-            latestTotalRef.current = tot
-            if (data.done) {
-              setFinalTotal(tot)
-              setIsDone(true)
-              setIsProcessing(false)
-            }
-          }
-          if (data.progress !== undefined) setProgress(data.progress)
-        } catch { /* ignore */ }
-      }
-
-      ws.onerror = () => {
-        setError('Connection failed. Make sure the backend is running.')
-        setIsProcessing(false)
-      }
-
-      ws.onclose = () => {
-        setIsProcessing(false)
-        setIsDone(true)
-        // Capture final total when stream ends
-        setFinalTotal(prev => (prev !== null && prev > 0) ? prev : latestTotalRef.current)
-      }
-
-    } catch (err: any) {
-      setError(`Error: ${err.response?.data?.detail || err.message || 'Upload failed.'}`)
-      setIsProcessing(false)
+    setVisibleHens(0)
+    if (overlayRef.current) {
+      const ctx = overlayRef.current.getContext('2d')
+      ctx?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
     }
   }
 
-  const startLiveCamera = async () => {
-    reset()
-    setIsLiveMode(true)
-    setIsProcessing(true)
-    setCameraError(null)
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Camera access is blocked by your browser. Since you are using a local IP (http://10.x.x.x), you MUST open chrome://flags/#unsafely-treat-insecure-origin-as-secure in your mobile Chrome, enter your IP, and enable it!')
+  const connectWs = (): Promise<WebSocket> => {
+    return new Promise((resolve, reject) => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        resolve(wsRef.current)
+        return
       }
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.play()
-        setIsCameraOpen(true)
-      }
-
-      let wsUrl: string
       const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+      let wsUrl = ''
       if (apiUrl) {
         wsUrl = `${apiUrl.replace(/^http/, 'ws')}/api/tracker/ws_live`
       } else {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
         wsUrl = `${wsProtocol}//${window.location.host}/api/tracker/ws_live`
       }
-
+      
       const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
-      const isWaitingRef = { current: false }
-
       ws.onopen = () => {
-        liveIntervalRef.current = window.setInterval(() => {
-          if (videoRef.current && canvasRef.current && ws.readyState === WebSocket.OPEN) {
-            if (isWaitingRef.current) return // Prevent lag buildup!
-
-            const ctx = canvasRef.current.getContext('2d')
-            const vw = videoRef.current.videoWidth
-            const vh = videoRef.current.videoHeight
-            if (vw && vh) {
-              const maxDim = 640
-              let drawW = vw
-              let drawH = vh
-              if (vw > maxDim || vh > maxDim) {
-                if (vw > vh) {
-                  drawW = maxDim
-                  drawH = Math.round(vh * (maxDim / vw))
-                } else {
-                  drawH = maxDim
-                  drawW = Math.round(vw * (maxDim / vh))
-                }
-              }
-              canvasRef.current.width = drawW
-              canvasRef.current.height = drawH
-              ctx?.drawImage(videoRef.current, 0, 0, drawW, drawH)
-              const b64 = canvasRef.current.toDataURL('image/jpeg', 0.5) 
-              
-              isWaitingRef.current = true
-              ws.send(b64)
-            }
-          }
-        }, 80) // Fast 12.5 FPS base interval, but throttled by backend speed
+        wsRef.current = ws
+        resolve(ws)
       }
-
+      ws.onerror = (e) => reject(e)
       ws.onmessage = (event) => {
+        sendingRef.current = false
         try {
           const data = JSON.parse(event.data)
-          isWaitingRef.current = false // Ready for next frame
-          
-          if (data.frame) setWsFrameBase64(data.frame)
-          if (data.visible_hens !== undefined) {
-             setVisibleHens(Number(data.visible_hens))
-             latestVisibleRef.current = Number(data.visible_hens)
-          }
-          if (data.total_hens !== undefined) {
-             setTotalHens(Number(data.total_hens))
-             latestTotalRef.current = Number(data.total_hens)
-          }
-        } catch {}
+          if (data.total_hens !== undefined) updateResults(data)
+        } catch (e) {}
       }
-
-      ws.onerror = () => {
-        setError('Live WS connection failed.')
-        setIsProcessing(false)
-      }
-
       ws.onclose = () => {
-        setIsProcessing(false)
-        setIsDone(true)
-        setFinalTotal(prev => (prev !== null && prev > 0) ? prev : latestTotalRef.current)
+        wsRef.current = null
       }
+    })
+  }
 
+  const contentRect = () => {
+    const video = videoRef.current
+    if (!video) return { x: 0, y: 0, width: 0, height: 0 }
+    const dw = video.clientWidth
+    const dh = video.clientHeight
+    const sw = video.videoWidth
+    const sh = video.videoHeight
+    if (!dw || !dh || !sw || !sh) return { x: 0, y: 0, width: dw, height: dh }
+
+    const sourceRatio = sw / sh
+    const displayRatio = dw / dh
+    if (sourceRatio > displayRatio) {
+      const width = dw
+      const height = width / sourceRatio
+      return { x: 0, y: (dh - height) / 2, width, height }
+    }
+    const height = dh
+    const width = height * sourceRatio
+    return { x: (dw - width) / 2, y: 0, width, height }
+  }
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    stopCamera()
+    resetLocal()
+    setStatusText('Loading video locally...')
+    
+    try {
+      await connectWs()
+      
+      const url = URL.createObjectURL(file)
+      if (videoRef.current) {
+        videoRef.current.src = url
+        videoRef.current.srcObject = null
+        videoRef.current.controls = true
+        videoRef.current.muted = false
+        videoRef.current.onloadedmetadata = async () => {
+          if (videoRef.current && overlayRef.current) {
+            overlayRef.current.width = videoRef.current.clientWidth
+            overlayRef.current.height = videoRef.current.clientHeight
+          }
+          try { await videoRef.current?.play() } catch (e) {}
+          runningRef.current = true
+          setHasVideoUrl(true)
+          setStatusText('🟢 VIDEO + AI LIVE')
+          startLoop()
+        }
+      }
     } catch (err: any) {
-      setCameraError('Failed to access camera: ' + err.message)
-      setIsProcessing(false)
-      setIsLiveMode(false)
-      setIsCameraOpen(false)
+      setStatusText('❌ ' + err.message)
     }
   }
 
-  // Keep finalTotal updated when tracking completes
-  useEffect(() => {
-    if (isDone && finalTotal === null) {
-      setFinalTotal(latestTotalRef.current)
+  const startCamera = async () => {
+    stopCamera()
+    resetLocal()
+    setIsLiveMode(true)
+    setStatusText('📷 Opening Camera...')
+    try {
+      await connectWs()
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.src = ""
+        videoRef.current.controls = false
+        videoRef.current.muted = true
+        videoRef.current.onloadedmetadata = async () => {
+          if (videoRef.current && overlayRef.current) {
+            overlayRef.current.width = videoRef.current.clientWidth
+            overlayRef.current.height = videoRef.current.clientHeight
+          }
+          try { await videoRef.current?.play() } catch (e) {}
+          runningRef.current = true
+          setIsCameraOpen(true)
+          setStatusText('📷 CAMERA + AI LIVE')
+          startLoop()
+        }
+      }
+    } catch (err: any) {
+      setStatusText('❌ Camera error: ' + err.message)
     }
-  }, [isDone, finalTotal])
+  }
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    runningRef.current = false
+    setIsLiveMode(false)
+    setIsCameraOpen(false)
+    setHasVideoUrl(false)
+    if (animationIdRef.current) {
+      cancelAnimationFrame(animationIdRef.current)
+      animationIdRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+      videoRef.current.src = ""
+    }
+  }
+
+  const resetAI = () => {
+    stopCamera()
+    resetLocal()
+    setStatusText('🔄 Reset complete.')
+  }
+
+  const startLoop = () => {
+    if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current)
+
+    const loop = (timestamp: number) => {
+      if (!runningRef.current) return
+      draw()
+      
+      const video = videoRef.current
+      if (video && video.readyState >= 2 && !video.paused && !video.ended) {
+        if (timestamp - lastSendRef.current >= 1000 / SEND_FPS) {
+          lastSendRef.current = timestamp
+          frameNumberRef.current++
+          if (!sendingRef.current) {
+            sendFrame(frameNumberRef.current)
+          }
+        }
+      }
+      animationIdRef.current = requestAnimationFrame(loop)
+    }
+    animationIdRef.current = requestAnimationFrame(loop)
+  }
+
+  const sendFrame = async (number: number) => {
+    const video = videoRef.current
+    const capture = captureRef.current
+    if (sendingRef.current || !video || !video.videoWidth || !capture || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+
+    sendingRef.current = true
+    try {
+      capture.width = video.videoWidth
+      capture.height = video.videoHeight
+      const ctx = capture.getContext('2d')
+      ctx?.drawImage(video, 0, 0, capture.width, capture.height)
+      
+      const b64 = capture.toDataURL('image/jpeg', 0.6)
+      const payload = {
+        frame: b64,
+        frame_number: number,
+        video_time: video.currentTime || 0
+      }
+      wsRef.current.send(JSON.stringify(payload))
+    } catch (e) {
+      console.warn(e)
+      sendingRef.current = false
+    }
+  }
+
+  const updateResults = (data: any) => {
+    const detections = data.detections || []
+    const video_time = Number(data.video_time || 0)
+    latestResultsRef.current = detections
+    latestResultTimeRef.current = video_time
+    
+    setTotalHens(data.total_hens || 0)
+    setVisibleHens(data.visible_hens || detections.length)
+    setStatusText(`🟢 AI LIVE | UNIQUE HENS: ${data.total_hens || 0}`)
+
+    const newPrevious: any = {}
+    const newVelocities: any = {}
+
+    for (const item of detections) {
+      const number = item.hen_number
+      const box = item.box
+      const old = previousRef.current[number]
+      let vx = 0
+      let vy = 0
+
+      if (old && video_time > old.time) {
+        const dt = Math.max(0.001, video_time - old.time)
+        const oldCX = (old.box[0] + old.box[2]) / 2
+        const oldCY = (old.box[1] + old.box[3]) / 2
+        const newCX = (box[0] + box[2]) / 2
+        const newCY = (box[1] + box[3]) / 2
+        vx = (newCX - oldCX) / dt
+        vy = (newCY - oldCY) / dt
+        vx = Math.max(-2500, Math.min(2500, vx))
+        vy = Math.max(-2500, Math.min(2500, vy))
+      }
+      newPrevious[number] = { box, time: video_time }
+      newVelocities[number] = { vx, vy }
+    }
+    previousRef.current = newPrevious
+    velocitiesRef.current = newVelocities
+  }
+
+  const draw = () => {
+    const video = videoRef.current
+    const overlay = overlayRef.current
+    if (!video || !overlay) return
+    
+    if (overlay.width !== video.clientWidth || overlay.height !== video.clientHeight) {
+      overlay.width = video.clientWidth
+      overlay.height = video.clientHeight
+    }
+    
+    const ctx = overlay.getContext('2d')
+    if (!ctx) return
+    ctx.clearRect(0, 0, overlay.width, overlay.height)
+
+    const detections = latestResultsRef.current
+    if (!detections.length || !video.videoWidth) return
+
+    const rect = contentRect()
+    const sx = rect.width / video.videoWidth
+    const sy = rect.height / video.videoHeight
+    const age = Math.min(0.50, Math.max(0, (video.currentTime || 0) - latestResultTimeRef.current))
+
+    for (const item of detections) {
+      let box = [...item.box]
+      const velocity = velocitiesRef.current[item.hen_number]
+      
+      if (velocity && age > 0) {
+        box[0] += velocity.vx * age
+        box[1] += velocity.vy * age
+        box[2] += velocity.vx * age
+        box[3] += velocity.vy * age
+      }
+
+      const x = rect.x + box[0] * sx
+      const y = rect.y + box[1] * sy
+      const width = (box[2] - box[0]) * sx
+      const height = (box[3] - box[1]) * sy
+
+      if (width <= 0 || height <= 0) continue
+
+      ctx.strokeStyle = '#00ff00'
+      ctx.lineWidth = item.predicted ? 2 : 3
+      ctx.strokeRect(x, y, width, height)
+
+      const label = `HEN ${item.hen_number}`
+      ctx.font = 'bold 15px Arial'
+      const textWidth = ctx.measureText(label).width
+      const labelY = Math.max(0, y - 22)
+      
+      ctx.fillStyle = '#00ff00'
+      ctx.fillRect(x, labelY, textWidth + 10, 22)
+      ctx.fillStyle = '#000000'
+      ctx.fillText(label, x + 5, labelY + 16)
+    }
+  }
 
   return (
-    <div
-      className="page-container page-with-bg"
-      style={{
-        backgroundImage: "linear-gradient(rgba(255,255,255,0.65),rgba(255,255,255,0.65)),url('/thermal-bg.jpg')",
-        backgroundSize: 'cover', backgroundPosition: 'center',
-      }}
-    >
+    <div className="page-container page-with-bg" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.65),rgba(255,255,255,0.65)),url('/thermal-bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center' }}>
       <header className="page-header" style={{ marginBottom: '32px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="page-icon-wrapper" style={{ background: '#3b82f6' }}>
@@ -248,201 +356,67 @@ export default function HenTrackingPage() {
           </div>
           <div>
             <h1 className="page-title">Live Hen Tracking</h1>
-            <p className="page-subtitle">
-              Upload a video — AI tracks every hen and streams it at normal video speed.
-            </p>
+            <p className="page-subtitle">Upload a video — AI tracks every hen and streams it at normal video speed.</p>
           </div>
         </div>
       </header>
 
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
-
       <div style={{ display: 'flex', flexDirection: 'row', gap: '24px', flexWrap: 'wrap' }}>
-
-        {/* ── Left: Video Panel ──────────────────────────────────── */}
         <div className="card" style={{ flex: '1 1 60%', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Video size={20} className="text-brand" />
-            {isDone ? 'Tracking Complete' : (jobId || isLiveMode) ? 'ML Tracking — Live Stream' : 'Start Tracking'}
+            {(hasVideoUrl || isCameraOpen) ? 'ML Tracking — Live Stream' : 'Start Tracking'}
           </h3>
 
-          {/* IDLE */}
-          {!jobId && !isLiveMode && (
+          {!hasVideoUrl && !isLiveMode && (
             <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-              <label style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px',
-                cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px'
-              }}>
+              <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px' }}>
                 <UploadCloud size={52} color="var(--brand-400)" style={{ marginBottom: '16px' }} />
                 <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>Upload Video</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                  AI processes every frame.
-                </span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>AI processes every frame.</span>
                 <input type="file" accept="video/*" onChange={handleVideoUpload} style={{ display: 'none' }} />
               </label>
 
-              <div onClick={startLiveCamera} style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px',
-                cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px'
-              }}>
+              <div onClick={startCamera} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px' }}>
                 <Video size={52} color="#22c55e" style={{ marginBottom: '16px' }} />
                 <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>Live Camera</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-                  Track hens live using your camera.
-                </span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>Track hens live using your camera.</span>
               </div>
             </div>
           )}
-          {cameraError && <p style={{ color: 'red' }}>{cameraError}</p>}
 
-          {/* Waiting for first frame (for file upload only, or before camera grants permission) */}
-          {((jobId && !wsFrameBase64) || (isLiveMode && !isCameraOpen)) && !isDone && (
-            <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '60px', border: '2px dashed var(--border)', borderRadius: '12px' }}>
-              <div style={{ width: '44px', height: '44px', borderRadius: '50%', border: '4px solid rgba(59,130,246,0.15)', borderTop: '4px solid #3b82f6', animation: 'spin 0.9s linear infinite' }} />
-              <p style={{ color: 'var(--text-muted)', fontWeight: '500', textAlign: 'center' }}>
-                {isLiveMode ? '📷 Opening Camera...' : '🤖 AI processing first frame…'}<br />
-                <span style={{ fontSize: '0.85rem' }}>{isLiveMode ? 'Please allow camera access.' : 'Stream starting shortly'}</span>
-              </p>
-            </div>
-          )}
-
-          {/* Video / Stream Container */}
-          <div className="fade-in" style={{ 
-            display: (wsFrameBase64 || isCameraOpen) ? 'block' : 'none',
-            position: 'relative', borderRadius: '12px', overflow: 'hidden', 
-            border: `2px solid ${isDone ? '#22c55e' : '#3b82f6'}`, background: '#000' 
-          }}>
-            <video 
-              ref={videoRef} 
-              playsInline 
-              muted 
-              autoPlay
-              style={{ 
-                display: (isCameraOpen && !wsFrameBase64) ? 'block' : 'none', 
-                width: '100%', height: 'auto', maxHeight: '550px', objectFit: 'contain'
-              }} 
-            />
-            {wsFrameBase64 && (
-              <img
-                src={`data:image/jpeg;base64,${wsFrameBase64}`}
-                alt="ML Tracking"
-                style={{ width: '100%', height: 'auto', maxHeight: '550px', objectFit: 'contain', display: 'block' }}
-              />
-            )}
-
-            {/* Badge */}
-            <div style={{
-              position: 'absolute', top: '14px', left: '14px',
-              background: isDone ? 'rgba(34,197,94,0.92)' : 'rgba(239,68,68,0.92)',
-              color: '#fff', padding: '4px 12px', borderRadius: '4px', fontSize: '0.85rem',
-              fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px',
-            }}>
-              {isDone
-                ? <><CheckCircle2 size={14} /> DONE</>
-                : <><div style={{ width: '8px', height: '8px', background: '#fff', borderRadius: '50%', animation: 'pulse-dot 1.5s infinite' }} /> LIVE</>
-              }
-            </div>
-
-            {/* Progress bar (only while processing a file) */}
-            {!isDone && jobId && (
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '5px', background: 'rgba(0,0,0,0.3)' }}>
-                <div style={{ height: '5px', background: 'linear-gradient(90deg,#3b82f6,#06b6d4)', width: `${progress}%`, transition: 'width 0.4s ease' }} />
-              </div>
-            )}
-
-            {/* Reset */}
-            <button onClick={reset} style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <div style={{ display: (hasVideoUrl || isCameraOpen) ? 'block' : 'none', position: 'relative', borderRadius: '12px', overflow: 'hidden', border: `2px solid #3b82f6`, background: '#000' }}>
+            <video ref={videoRef} playsInline style={{ display: 'block', width: '100%', height: 'auto', maxHeight: '550px', objectFit: 'contain' }} />
+            <canvas ref={overlayRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
+            
+            <button onClick={resetAI} style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
               <RefreshCw size={18} />
             </button>
           </div>
-
-          {error && (
-            <div style={{ padding: '14px', background: 'rgba(239,68,68,0.1)', color: '#ef4444', borderRadius: '10px' }}>
-              {error}
-            </div>
-          )}
+          <div style={{ padding: '14px', background: 'rgba(34,197,94,0.1)', color: '#22c55e', borderRadius: '10px' }}>
+            {statusText}
+          </div>
         </div>
 
-        {/* ── Right: Stats Panel ────────────────────────────────── */}
         <div className="card" style={{ flex: '1 1 30%', padding: '24px', display: 'flex', flexDirection: 'column' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
             <Activity size={20} className="text-brand" />
-            {isDone ? 'Final Result' : 'Live Count'}
+            Live Count
           </h3>
-
-          {!isProcessing && !isDone && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, opacity: 0.5 }}>
-              <Layers size={64} color="var(--text-muted)" style={{ marginBottom: '16px' }} />
-              <p style={{ textAlign: 'center' }}>Upload a video or use live camera to see tracking counts.</p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flex: 1, gap: '24px' }}>
+            <div style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.2)', padding: '32px', borderRadius: '16px', textAlign: 'center' }}>
+              <div style={{ fontSize: '1rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '600', marginBottom: '12px' }}>Total Hens (Live)</div>
+              <div style={{ fontSize: '6rem', fontWeight: '900', color: '#3b82f6', lineHeight: 1 }}>{totalHens}</div>
             </div>
-          )}
 
-          {(isProcessing || isDone) && (
-            <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flex: 1, gap: '24px' }}>
-
-              {/* Total Hens */}
-              <div style={{
-                background: isDone ? 'rgba(34,197,94,0.07)' : 'rgba(59,130,246,0.05)',
-                border: `1px solid ${isDone ? 'rgba(34,197,94,0.3)' : 'rgba(59,130,246,0.2)'}`,
-                padding: '32px', borderRadius: '16px', textAlign: 'center',
-              }}>
-                <div style={{ fontSize: '1rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '600', marginBottom: '12px' }}>
-                  {isDone ? '✅ Final Total Hens' : 'Total Hens (Live)'}
-                </div>
-                <div style={{ fontSize: '6rem', fontWeight: '900', color: isDone ? '#22c55e' : '#3b82f6', lineHeight: 1 }}>
-                  {isDone ? (finalTotal ?? totalHens) : totalHens}
-                </div>
-              </div>
-
-              {/* Visible Hens (only while live) */}
-              {!isDone && (
-                <div style={{ background: 'rgba(255,255,255,0.5)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '600', marginBottom: '12px' }}>
-                    Currently Visible
-                  </div>
-                  <div style={{ fontSize: '3rem', fontWeight: '700', color: 'var(--text-primary)', lineHeight: 1 }}>
-                    {visibleHens}
-                  </div>
-                </div>
-              )}
-
-              {/* Progress (while processing a file) */}
-              {!isDone && jobId && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-                    <span>ML Processing</span>
-                    <strong style={{ color: '#3b82f6' }}>{progress}%</strong>
-                  </div>
-                  <div style={{ background: 'rgba(0,0,0,0.08)', borderRadius: '999px', height: '8px' }}>
-                    <div style={{ height: '8px', borderRadius: '999px', background: 'linear-gradient(90deg,#3b82f6,#06b6d4)', width: `${progress}%`, transition: 'width 0.5s ease' }} />
-                  </div>
-                </div>
-              )}
-
-              {/* Done message */}
-              {isDone && (
-                <div style={{ textAlign: 'center', padding: '16px', background: 'rgba(34,197,94,0.08)', borderRadius: '12px', color: '#22c55e', fontWeight: '600' }}>
-                  <CheckCircle2 size={20} style={{ marginBottom: '8px' }} />
-                  <div>Tracking complete!</div>
-                  <div style={{ fontSize: '0.85rem', opacity: 0.8, marginTop: '4px' }}>
-                    All frames tracked. Final count shown above.
-                  </div>
-                </div>
-              )}
-
+            <div style={{ background: 'rgba(255,255,255,0.5)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '600', marginBottom: '12px' }}>Currently Visible</div>
+              <div style={{ fontSize: '3rem', fontWeight: '700', color: 'var(--text-primary)', lineHeight: 1 }}>{visibleHens}</div>
             </div>
-          )}
+          </div>
         </div>
       </div>
-
-      <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes pulse-dot { 0%,100%{opacity:1;}50%{opacity:0.2;} }
-        .fade-in { animation: fadeIn 0.4s ease forwards; }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);} }
-        @keyframes spin { to{transform:rotate(360deg);} }
-      ` }} />
     </div>
   )
 }
