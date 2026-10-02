@@ -6,7 +6,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect
 import tempfile
 
-from app.ai.stable_tracker import StableHenTracker
+from app.ai.high_recall_tracker import HighRecallHenTracker
 
 router = APIRouter(prefix="/api/tracker", tags=["Hen Tracking"])
 
@@ -95,7 +95,7 @@ async def ws_stream_tracking_video(websocket: WebSocket, job_id: str):
     job["status"] = "processing"
 
     frame_queue: queue.Queue = queue.Queue()
-    tracker = StableHenTracker(model_path=model_path)
+    tracker = HighRecallHenTracker(model_path=model_path)
 
     def producer():
         try:
@@ -178,7 +178,7 @@ async def ws_live_tracking(websocket: WebSocket):
         await websocket.close(code=1011, reason="Model not found")
         return
 
-    tracker = StableHenTracker(model_path=model_path)
+    tracker = HighRecallHenTracker(model_path=model_path)
     frame_no = 0
 
     try:

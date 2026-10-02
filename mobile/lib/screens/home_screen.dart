@@ -263,9 +263,9 @@ class _HomeTabState extends State<_HomeTab> {
             margin: const EdgeInsets.symmetric(horizontal: 16),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: _position != null ? const Color(0xFF10B981).withOpacity(0.1) : const Color(0xFFF59E0B).withOpacity(0.1),
+              color: _position != null ? const Color(0xFF10B981).withValues(alpha: 0.1) : const Color(0xFFF59E0B).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _position != null ? const Color(0xFF10B981).withOpacity(0.3) : const Color(0xFFF59E0B).withOpacity(0.3)),
+              border: Border.all(color: _position != null ? const Color(0xFF10B981).withValues(alpha: 0.3) : const Color(0xFFF59E0B).withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
@@ -314,21 +314,21 @@ class _HomeTabState extends State<_HomeTab> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: _verificationStatus == 'VERIFIED'
-                  ? const Color(0xFF10B981).withOpacity(0.12)
+                  ? const Color(0xFF10B981).withValues(alpha: 0.12)
                   : _verificationStatus == 'SUSPICIOUS'
-                  ? const Color(0xFFEF4444).withOpacity(0.12)
+                  ? const Color(0xFFEF4444).withValues(alpha: 0.12)
                   : _success
-                  ? const Color(0xFF10B981).withOpacity(0.1)
-                  : const Color(0xFFEF4444).withOpacity(0.1),
+                  ? const Color(0xFF10B981).withValues(alpha: 0.1)
+                  : const Color(0xFFEF4444).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: _verificationStatus == 'VERIFIED'
-                    ? const Color(0xFF10B981).withOpacity(0.5)
+                    ? const Color(0xFF10B981).withValues(alpha: 0.5)
                     : _verificationStatus == 'SUSPICIOUS'
-                    ? const Color(0xFFEF4444).withOpacity(0.5)
+                    ? const Color(0xFFEF4444).withValues(alpha: 0.5)
                     : _success
-                    ? const Color(0xFF10B981).withOpacity(0.3)
-                    : const Color(0xFFEF4444).withOpacity(0.3),
+                    ? const Color(0xFF10B981).withValues(alpha: 0.3)
+                    : const Color(0xFFEF4444).withValues(alpha: 0.3),
                 ),
               ),
               child: Column(
@@ -387,7 +387,7 @@ class _HomeTabState extends State<_HomeTab> {
                       : [const Color(0xFF4F46E5), const Color(0xFF818CF8)],
                   ),
                   boxShadow: [BoxShadow(
-                    color: const Color(0xFF6366F1).withOpacity(0.4),
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.4),
                     blurRadius: 20, offset: const Offset(0, 4),
                   )],
                 ),
@@ -463,7 +463,7 @@ class _EvidenceListTabState extends State<_EvidenceListTab> {
                       Container(
                         width: 40, height: 40,
                         decoration: BoxDecoration(
-                          color: ev.isSynced ? const Color(0xFF10B981).withOpacity(0.15) : const Color(0xFFF59E0B).withOpacity(0.15),
+                          color: ev.isSynced ? const Color(0xFF10B981).withValues(alpha: 0.15) : const Color(0xFFF59E0B).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Icon(
@@ -486,9 +486,9 @@ class _EvidenceListTabState extends State<_EvidenceListTab> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: ev.isSynced ? const Color(0xFF10B981).withOpacity(0.15) : const Color(0xFFF59E0B).withOpacity(0.15),
+                          color: ev.isSynced ? const Color(0xFF10B981).withValues(alpha: 0.15) : const Color(0xFFF59E0B).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: ev.isSynced ? const Color(0xFF10B981).withOpacity(0.3) : const Color(0xFFF59E0B).withOpacity(0.3)),
+                          border: Border.all(color: ev.isSynced ? const Color(0xFF10B981).withValues(alpha: 0.3) : const Color(0xFFF59E0B).withValues(alpha: 0.3)),
                         ),
                         child: Text(
                           ev.isSynced ? 'Synced' : 'Pending',
@@ -567,7 +567,7 @@ class _ProfileTab extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1).withOpacity(0.15),
+                            color: const Color(0xFF6366F1).withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(user?.role.replaceAll('_', ' ') ?? '', style: const TextStyle(color: Color(0xFF818CF8), fontSize: 10, fontWeight: FontWeight.w600)),
@@ -585,9 +585,9 @@ class _ProfileTab extends StatelessWidget {
             if (pendingCount > 0) Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFF59E0B).withOpacity(0.1),
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -627,9 +627,9 @@ class _ProfileTab extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
