@@ -14,7 +14,7 @@ class HighRecallHenTracker:
         else:
             self.device = 0 if torch.cuda.is_available() else "cpu"
         
-        self.img_size = 1280 if self.device != "cpu" else 640
+        self.img_size = 640
         self.use_half = True if self.device != "cpu" else False
         
         self.YOLO_CONF = 0.05
