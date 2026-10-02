@@ -18,6 +18,7 @@ export default function HenTrackingPage() {
   
   const runningRef = useRef(false)
   const sendingRef = useRef(false)
+  const sendTimeoutRef = useRef<number | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const animationIdRef = useRef<number | null>(null)
   const frameNumberRef = useRef(0)
@@ -128,10 +129,9 @@ export default function HenTrackingPage() {
       
       const url = URL.createObjectURL(file)
       if (videoRef.current) {
-        videoRef.current.src = url
         videoRef.current.srcObject = null
         videoRef.current.controls = true
-        videoRef.current.muted = false
+        videoRef.current.muted = true
         videoRef.current.onloadedmetadata = async () => {
           if (videoRef.current && overlayRef.current) {
             overlayRef.current.width = videoRef.current.clientWidth
@@ -143,6 +143,7 @@ export default function HenTrackingPage() {
           setStatusText('🟢 VIDEO + AI LIVE')
           startLoop()
         }
+        videoRef.current.src = url
       }
     } catch (err: any) {
       setStatusText('❌ ' + err.message)
@@ -159,8 +160,6 @@ export default function HenTrackingPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
       streamRef.current = stream
       if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.src = ""
         videoRef.current.controls = false
         videoRef.current.muted = true
         videoRef.current.onloadedmetadata = async () => {
@@ -174,6 +173,8 @@ export default function HenTrackingPage() {
           setStatusText('📷 CAMERA + AI LIVE')
           startLoop()
         }
+        videoRef.current.srcObject = stream
+        videoRef.current.src = ""
       }
     } catch (err: any) {
       setStatusText('❌ Camera error: ' + err.message)
@@ -234,6 +235,11 @@ export default function HenTrackingPage() {
     if (sendingRef.current || !video || !video.videoWidth || !capture || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
 
     sendingRef.current = true
+    if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current)
+    sendTimeoutRef.current = window.setTimeout(() => {
+      sendingRef.current = false
+    }, 2000)
+
     try {
       capture.width = video.videoWidth
       capture.height = video.videoHeight

@@ -207,13 +207,20 @@ async def ws_live_tracking(websocket: WebSocket):
                 img_data = base64.b64decode(data)
                 np_arr = np.frombuffer(img_data, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            except:
+            except Exception as e:
+                print(f"[Tracker] Base64 decoding failed: {e}")
                 continue
 
             if frame is None:
+                print("[Tracker] Frame is None")
                 continue
 
-            b64, vis_count, tot_count, detections = tracker.process_frame(frame, frame_no, fps=5.0, video_time=video_time)
+            try:
+                b64, vis_count, tot_count, detections = tracker.process_frame(frame, frame_no, fps=5.0, video_time=video_time)
+            except Exception as e:
+                print(f"[Tracker] process_frame error: {e}")
+                import traceback; traceback.print_exc()
+                continue
 
             await websocket.send_json({
                 "video_time": video_time,
