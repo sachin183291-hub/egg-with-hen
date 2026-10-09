@@ -5,7 +5,7 @@ import axios from 'axios'
 
 // On Render: VITE_API_URL is injected at build time from the backend service URL
 // On localhost: empty string means Vite proxy handles /api/* → http://127.0.0.1:8000
-const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') // cache-bust: 1
 
 export const api = axios.create({
   baseURL: API_URL,

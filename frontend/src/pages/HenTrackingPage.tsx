@@ -111,17 +111,46 @@ export default function HenTrackingPage() {
             overlayRef.current.width = videoRef.current.clientWidth
             overlayRef.current.height = videoRef.current.clientHeight
           }
-          try { await videoRef.current?.play() } catch (e) {}
+          // DO NOT play the video automatically. We will control the frames for perfect AI sync!
+          videoRef.current?.pause() 
           runningRef.current = true
           setHasVideoUrl(true)
-          setStatusText('🟢 VIDEO + AI LIVE')
-          startLoop()
+          setStatusText('🟢 AI SYNC MODE (Perfect Tracking)')
+          processSyncLoop()
         }
         videoRef.current.src = url
       }
     } catch (err: any) {
       setStatusText('❌ ' + err.message)
     }
+  }
+
+  const processSyncLoop = async () => {
+    if (!runningRef.current || !videoRef.current) return
+    const video = videoRef.current
+    
+    // Draw current state
+    draw()
+    
+    if (video.currentTime >= video.duration) {
+      setStatusText('✅ Video processing complete.')
+      return
+    }
+
+    // Capture and send frame
+    await sendFrame(frameNumberRef.current + 1)
+    frameNumberRef.current++
+
+    // Advance video by 1/15th of a second (15 FPS)
+    video.currentTime += 1 / 15
+    
+    // Wait for the video to seek to the new frame before continuing
+    video.addEventListener('seeked', function onSeeked() {
+      video.removeEventListener('seeked', onSeeked)
+      if (runningRef.current) {
+        requestAnimationFrame(processSyncLoop)
+      }
+    }, { once: true })
   }
 
   const startCamera = async () => {
@@ -304,6 +333,9 @@ export default function HenTrackingPage() {
     const sy = rect.height / video.videoHeight
     const age = Math.min(0.50, Math.max(0, (video.currentTime || 0) - latestResultTimeRef.current))
 
+    let visibleCount = 0
+
+    // Draw bounding boxes
     for (const item of detections) {
       let box = [...item.box]
       const velocity = velocitiesRef.current[item.hen_number]
@@ -321,21 +353,47 @@ export default function HenTrackingPage() {
       const height = (box[3] - box[1]) * sy
 
       if (width <= 0 || height <= 0) continue
+      
+      visibleCount++
 
-      ctx.strokeStyle = '#00ff00'
+      // Draw box
+      ctx.strokeStyle = item.predicted ? '#ffa500' : '#00ff00' // Orange for predicted, Green for normal
       ctx.lineWidth = item.predicted ? 2 : 3
       ctx.strokeRect(x, y, width, height)
 
-      const label = `HEN ${item.hen_number}`
+      // Draw label
+      const label = item.predicted ? `HEN ${item.hen_number} (P)` : `HEN ${item.hen_number}`
       ctx.font = 'bold 15px Arial'
       const textWidth = ctx.measureText(label).width
       const labelY = Math.max(0, y - 22)
       
-      ctx.fillStyle = '#00ff00'
+      ctx.fillStyle = item.predicted ? '#ffa500' : '#00ff00'
       ctx.fillRect(x, labelY, textWidth + 10, 22)
+      
       ctx.fillStyle = '#000000'
       ctx.fillText(label, x + 5, labelY + 16)
     }
+
+    // Draw the Black Info Panel exactly like the video
+    // Scale panel size based on video width for responsiveness
+    const scale = Math.max(0.6, rect.width / 1280)
+    
+    ctx.fillStyle = '#000000' // Black background
+    ctx.fillRect(rect.x + 20 * scale, rect.y + 20 * scale, 350 * scale, 150 * scale)
+
+    // TIME
+    ctx.font = `bold ${24 * scale}px Arial`
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText(`TIME: ${(video.currentTime || 0).toFixed(1)}s`, rect.x + 35 * scale, rect.y + 60 * scale)
+
+    // VISIBLE HENS
+    ctx.fillStyle = '#00ff00'
+    ctx.fillText(`VISIBLE HENS: ${visibleCount}`, rect.x + 35 * scale, rect.y + 105 * scale)
+
+    // TOTAL HENS
+    ctx.font = `900 ${28 * scale}px Arial`
+    ctx.fillStyle = '#00ffff' // Yellow/Cyan depending on video, stable_tracker used (0,255,255) in BGR which is Yellow
+    ctx.fillText(`TOTAL HENS: ${totalHens}`, rect.x + 35 * scale, rect.y + 155 * scale)
   }
 
   return (
@@ -370,7 +428,7 @@ export default function HenTrackingPage() {
 
               <div onClick={startCamera} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px' }}>
                 <Video size={52} color="#22c55e" style={{ marginBottom: '16px' }} />
-                <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>Live Camera</span>
+                <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>Start Live Video</span>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>Track hens live using your camera.</span>
               </div>
             </div>
@@ -392,7 +450,7 @@ export default function HenTrackingPage() {
                 style={{ background: '#ef4444', color: '#fff', padding: '12px 32px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', cursor: 'pointer', display: 'flex', gap: '8px', alignItems: 'center' }}
               >
                 <RefreshCw size={20} />
-                Stop Tracking
+                Stop Live Video
               </button>
             </div>
           )}

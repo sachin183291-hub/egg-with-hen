@@ -22,7 +22,12 @@ const EggAIChatPage = lazy(() => import('./pages/EggAIChatPage'))
 const HenHealthPage = lazy(() => import('./pages/HenHealthPage'))
 const ThermalCameraPage = lazy(() => import('./pages/ThermalCameraPage'))
 const HenTrackingPage = lazy(() => import('./pages/HenTrackingPage'))
+const HenCombTrackingPage = lazy(() => import('./pages/HenCombTrackingPage'))
 const DronePage = lazy(() => import('./pages/DronePage'))
+const FarmIntelligenceDashboard = lazy(() => import('./pages/FarmIntelligenceDashboard'))
+const DigitalTwinPage = lazy(() => import('./pages/DigitalTwinPage'))
+const ActionCenterPage = lazy(() => import('./pages/ActionCenterPage'))
+const FinancialAnalyticsPage = lazy(() => import('./pages/FinancialAnalyticsPage'))
 
 const PageLoader = () => (
   <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', width: '100vw', backgroundColor: 'var(--bg-main)' }}>
@@ -50,11 +55,16 @@ export default function App() {
             <Route path="/hen-health"     element={<HenHealthPage />} />
             <Route path="/thermal-camera"  element={<ThermalCameraPage />} />
             <Route path="/video-tracking"  element={<HenTrackingPage />} />
+            <Route path="/hen-comb-tracking" element={<HenCombTrackingPage />} />
             <Route path="/drone"           element={<DronePage />} />
             <Route path="/blockchain"      element={<BlockchainPage />} />
             <Route path="/audit-logs"      element={<AuditLogsPage />} />
             <Route path="/reports"         element={<ReportsPage />} />
             <Route path="/settings"        element={<SettingsPage />} />
+            <Route path="/farm-intelligence" element={<FarmIntelligenceDashboard />} />
+            <Route path="/digital-twin"    element={<DigitalTwinPage />} />
+            <Route path="/action-center"   element={<ActionCenterPage />} />
+            <Route path="/financial-analytics" element={<FinancialAnalyticsPage />} />
           </Route>
         </Routes>
       </Suspense>

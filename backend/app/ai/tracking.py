@@ -20,23 +20,40 @@ from typing import Callable, Optional
 
 # ─── Model path resolution ────────────────────────────────────────────────────
 # Priority order:
-#   1. Trained custom model (egg_detector.pt = copy of user's best(3).pt)
-#   2. Fallback to generic yolov8n.pt (ultralytics auto-downloads)
+#   1. User-trained best.pt in the project root/backend (the actual model used for
+#      poultry hen-comb detection on uploaded videos)
+#   2. Legacy egg_detector.pt path used by earlier experiments
+#   3. Fallback to generic yolov8n.pt (ultralytics auto-downloads)
 
-_THIS_DIR   = os.path.dirname(os.path.abspath(__file__))
-_CUSTOM_MODEL = os.path.join(_THIS_DIR, "models", "egg_detector.pt")
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
+
+_MODEL_CANDIDATES = [
+    os.path.join(_REPO_ROOT, "best.pt"),
+    os.path.join(_REPO_ROOT, "backend", "best.pt"),
+    os.path.join(_REPO_ROOT, "weights", "best.pt"),
+    os.path.join(_REPO_ROOT, "backend", "weights", "best.pt"),
+    os.path.join(_THIS_DIR, "models", "egg_detector.pt"),
+    os.path.join(_THIS_DIR, "models", "best.pt"),
+    os.path.join(_THIS_DIR, "egg_detector.pt"),
+    "best.pt",
+]
 _FALLBACK_MODEL = "yolov8n.pt"
 
 
 def get_model_path() -> str:
     """
     Return the absolute path to the trained YOLO model.
-    Uses egg_detector.pt (= user's trained best(3).pt) when present,
-    otherwise falls back to yolov8n.pt.
+    Prefer the project's actual best.pt before falling back to any generic model.
     """
-    if os.path.exists(_CUSTOM_MODEL):
-        return _CUSTOM_MODEL
-    print(f"[WARNING] Custom model not found at {_CUSTOM_MODEL}. Using yolov8n fallback.")
+    for candidate in _MODEL_CANDIDATES:
+        if os.path.exists(candidate):
+            return candidate
+
+    print(
+        f"[WARNING] No trained model was found in the project. "
+        f"Checked: {', '.join(_MODEL_CANDIDATES)}. Using yolov8n fallback."
+    )
     return _FALLBACK_MODEL
 
 
@@ -65,8 +82,8 @@ def process_video(
     Raises:
         RuntimeError: if the video cannot be opened or model cannot be loaded.
     """
-    from app.ai.stable_tracker import StableHenTracker
+    from app.ai.fast_tracker import FastHenTracker
 
     model_path = get_model_path()
-    tracker = StableHenTracker(model_path=model_path)
+    tracker = FastHenTracker(model_path=model_path)
     return tracker.process_video(video_path, progress_callback=progress_callback)

@@ -9,7 +9,6 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
-      basicSsl(),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.svg', 'kr-logo.png', 'bg-image.png'],

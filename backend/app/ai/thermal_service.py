@@ -963,6 +963,8 @@ async def generate_uploaded_video_stream(input_path: str):
 
     last_rects = []
     last_boxes_data = []
+    
+    stream_start_time = time.time()
 
     try:
         while True:
@@ -1068,9 +1070,11 @@ async def generate_uploaded_video_stream(input_path: str):
             _, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
             
             # Sleep precisely the remaining time of the frame to enforce flawless real-time playback speed
-            elapsed = time.time() - start_time
-            sleep_time = max(0.001, (1.0 / fps) - elapsed)
-            await asyncio.sleep(sleep_time)
+            target_elapsed = frame_idx / fps
+            actual_elapsed = time.time() - stream_start_time
+            sleep_time = target_elapsed - actual_elapsed
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
             
             yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n"
             

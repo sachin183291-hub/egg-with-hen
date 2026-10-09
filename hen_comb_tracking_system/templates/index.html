@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Perfect Sync Poultry Tracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: rgba(20, 27, 45, 0.75);
+            --primary: #10b981;
+            --primary-hover: #059669;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --glow: 0 0 20px rgba(16, 185, 129, 0.3);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, var(--bg-color) 0%, #030712 100%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            padding: 2.5rem 0;
+            text-align: center;
+            background: rgba(11, 15, 25, 0.6);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 2.5rem;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            margin: 0;
+            font-weight: 800;
+            font-size: 3rem;
+            background: linear-gradient(to right, #34d399, #10b981, #059669);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1px;
+            text-transform: uppercase;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 1100px;
+            display: flex;
+            flex-direction: column;
+            gap: 2.5rem;
+            margin-bottom: 3rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 24px;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(16px);
+            transition: transform 0.3s ease;
+        }
+
+        .upload-area {
+            border: 2px dashed rgba(16, 185, 129, 0.5);
+            border-radius: 16px;
+            padding: 4rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            background: rgba(16, 185, 129, 0.02);
+        }
+
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary);
+            background: rgba(16, 185, 129, 0.08);
+            box-shadow: var(--glow);
+        }
+
+        .upload-area p {
+            margin: 1.5rem 0 0.5rem;
+            font-size: 1.25rem;
+            color: var(--text-main);
+            font-weight: 600;
+        }
+        
+        .upload-area span {
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+
+        .upload-area input[type="file"] {
+            opacity: 0;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+            color: white;
+            border: none;
+            padding: 1rem 3rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 20px -10px rgba(16, 185, 129, 0.8);
+            font-family: 'Outfit', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 15px 25px -10px rgba(16, 185, 129, 0.9);
+        }
+
+        .btn:disabled {
+            background: #334155;
+            color: #94a3b8;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        #processing-status {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .spinner-container {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1.5rem;
+        }
+
+        .spinner {
+            width: 100%;
+            height: 100%;
+            border: 4px solid rgba(16, 185, 129, 0.1);
+            border-left-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .spinner-inner {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            bottom: 15px;
+            border: 4px solid rgba(16, 185, 129, 0.1);
+            border-right-color: #34d399;
+            border-radius: 50%;
+            animation: spin 1.5s linear infinite reverse;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .video-container {
+            display: none;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            background: #000;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            animation: fadeIn 0.8s ease-out;
+        }
+        
+        .video-header {
+            background: rgba(15, 23, 42, 0.9);
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .video-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: var(--primary);
+        }
+
+        video {
+            width: 100%;
+            display: block;
+            max-height: 70vh;
+            background: #000;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Hen-Comb Tracker</h1>
+        <div class="subtitle">Perfect Sync & Flawless Output Engine</div>
+    </header>
+
+    <div class="container">
+        <div class="card" id="upload-card">
+            <form id="upload-form" enctype="multipart/form-data">
+                <div class="upload-area" id="drop-zone">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--primary); filter: drop-shadow(0 0 8px rgba(16,185,129,0.5));">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <p id="file-name">Drag & Drop your video file here</p>
+                    <span>Upload to generate perfectly synchronized video</span>
+                    <input type="file" id="video-file" name="video" accept="video/mp4,video/x-m4v,video/*" required>
+                </div>
+                
+                <div style="text-align: center; margin-top: 2rem;">
+                    <button type="submit" class="btn" id="upload-btn">Generate Video</button>
+                </div>
+            </form>
+
+            <div id="processing-status">
+                <div class="spinner-container">
+                    <div class="spinner"></div>
+                    <div class="spinner-inner"></div>
+                </div>
+                <h2 style="color: var(--primary); margin-bottom: 0.5rem;">Generating Flawless Video...</h2>
+                <p style="color: var(--text-muted); max-width: 400px; margin: 0 auto; line-height: 1.6;">
+                    Please wait ~15 seconds. The AI is tracking every frame perfectly. <br>
+                    <strong>This guarantees 100% accurate box timing and NO stuttering!</strong>
+                </p>
+            </div>
+        </div>
+
+        <div class="video-container" id="video-wrapper">
+            <div class="video-header">
+                <h2>Analysis Complete</h2>
+                <a href="/" class="btn" style="padding: 0.6rem 1.5rem; font-size: 1rem; text-decoration: none;">Track New Video</a>
+            </div>
+            <video id="result-video" controls autoplay loop>
+                Your browser does not support the video tag.
+            </video>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('upload-form');
+        const fileInput = document.getElementById('video-file');
+        const fileNameDisplay = document.getElementById('file-name');
+        const uploadBtn = document.getElementById('upload-btn');
+        const statusDiv = document.getElementById('processing-status');
+        const uploadForm = document.getElementById('upload-form');
+        const videoWrapper = document.getElementById('video-wrapper');
+        const resultVideo = document.getElementById('result-video');
+        const dropZone = document.getElementById('drop-zone');
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                fileNameDisplay.innerText = fileInput.files[0].name;
+                fileNameDisplay.style.color = 'var(--primary)';
+            } else {
+                fileNameDisplay.innerText = 'Drag & Drop your video file here';
+                fileNameDisplay.style.color = 'var(--text-main)';
+            }
+        });
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false)
+        });
+
+        function preventDefaults (e) {
+            e.preventDefault()
+            e.stopPropagation()
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.add('dragover')
+            }, false)
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.remove('dragover')
+            }, false)
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            let dt = e.dataTransfer;
+            let files = dt.files;
+            fileInput.files = files;
+            if (fileInput.files.length > 0) {
+                fileNameDisplay.innerText = fileInput.files[0].name;
+                fileNameDisplay.style.color = 'var(--primary)';
+            }
+        }, false);
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (fileInput.files.length === 0) return;
+
+            const formData = new FormData();
+            formData.append('video', fileInput.files[0]);
+
+            uploadForm.style.display = 'none';
+            statusDiv.style.display = 'block';
+            videoWrapper.style.display = 'none';
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Force browser to fetch the new video
+                    resultVideo.src = data.video_url + '?t=' + new Date().getTime();
+                    videoWrapper.style.display = 'block';
+                    
+                    uploadForm.style.display = 'block';
+                    statusDiv.style.display = 'none';
+                    fileInput.value = '';
+                    fileNameDisplay.innerText = 'Analyze Another Video';
+                    fileNameDisplay.style.color = 'var(--text-main)';
+                } else {
+                    alert('Error: ' + data.error);
+                    uploadForm.style.display = 'block';
+                    statusDiv.style.display = 'none';
+                }
+            } catch (err) {
+                alert('Request failed: ' + err);
+                uploadForm.style.display = 'block';
+                statusDiv.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

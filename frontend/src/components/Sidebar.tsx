@@ -5,12 +5,16 @@ import { getInitials } from '../utils/helpers'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Map, Image, Users, Cpu, Blocks,
-  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse, Thermometer, Plane, Layers
+  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse, Thermometer, Plane, Layers, AlertTriangle, DollarSign
 } from 'lucide-react'
 
 const navItems = [
   { group: 'Main', items: [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/digital-twin', label: 'Digital Twin', icon: Layers },
+    { to: '/farm-intelligence', label: 'Farm BI', icon: BarChart2 },
+    { to: '/financial-analytics', label: 'Finance', icon: DollarSign },
+    { to: '/action-center', label: 'Action Center', icon: AlertTriangle },
     { to: '/map', label: 'GIS Map', icon: Map, hideFromRestricted: true },
     { to: '/evidence', label: 'Evidence', icon: Image },
   ]},
@@ -26,6 +30,7 @@ const navItems = [
     { to: '/hen-health', label: 'Hen Health', icon: HeartPulse },
     { to: '/thermal-camera', label: 'Thermal Camera', icon: Thermometer },
     { to: '/video-tracking', label: 'Video Tracking', icon: Layers },
+    { to: '/hen-comb-tracking', label: 'Hen Comb Tracking', icon: Layers },
     { to: '/blockchain', label: 'Blockchain', icon: Blocks, hideFromRestricted: true },
   ]},
   { group: 'Records', items: [

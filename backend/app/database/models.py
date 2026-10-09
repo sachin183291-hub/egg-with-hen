@@ -363,3 +363,131 @@ class Notification(Base):
         Index("idx_notifications_user", "user_id"),
         Index("idx_notifications_read", "is_read"),
     )
+
+# ─── Phase 3 & 4: Digital Farm & BI Models ────────────────────────────────────
+
+class Farm(Base):
+    __tablename__ = "farms"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    name = Column(String(200), nullable=False)
+    location = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Shed(Base):
+    __tablename__ = "sheds"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    farm_id = Column(String(36), ForeignKey("farms.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    farm = relationship("Farm")
+
+class Zone(Base):
+    __tablename__ = "zones"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    shed_id = Column(String(36), ForeignKey("sheds.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    shed = relationship("Shed")
+
+class Row(Base):
+    __tablename__ = "rows"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    zone = relationship("Zone")
+
+class Cage(Base):
+    __tablename__ = "cages"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    row_id = Column(String(36), ForeignKey("rows.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    capacity = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    row = relationship("Row")
+
+class HenPopulation(Base):
+    __tablename__ = "hen_population"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    date = Column(DateTime(timezone=True), server_default=func.now())
+    total_hens = Column(Integer, default=0)
+    visible_hens = Column(Integer, default=0)
+    unique_hens = Column(Integer, default=0)
+    source = Column(String(100), default="AI_TRACKER") # e.g. AI_TRACKER or MANUAL
+
+class EggProduction(Base):
+    __tablename__ = "egg_production"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    date = Column(DateTime(timezone=True), server_default=func.now())
+    eggs_produced = Column(Integer, default=0)
+    eggs_sold = Column(Integer, default=0)
+
+class FinancialRecord(Base):
+    __tablename__ = "financial_records"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    date = Column(DateTime(timezone=True), server_default=func.now())
+    type = Column(String(50), nullable=False) # REVENUE or EXPENSE
+    category = Column(String(100), nullable=False) # Egg Sales, Feed, Labour, Medicine, etc.
+    amount = Column(Float, nullable=False)
+    description = Column(Text, nullable=True)
+    farm_id = Column(String(36), ForeignKey("farms.id"), nullable=True)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+
+class Anomaly(Base):
+    __tablename__ = "anomalies"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    type = Column(String(100), nullable=False) # Production Drop, Temp Deviation, etc.
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    date = Column(DateTime(timezone=True), server_default=func.now())
+    observed_value = Column(Float, nullable=True)
+    expected_value = Column(Float, nullable=True)
+    severity = Column(String(50), default="MEDIUM") # LOW, MEDIUM, HIGH, CRITICAL
+    status = Column(String(50), default="NEW") # NEW, ACKNOWLEDGED, RESOLVED
+    evidence = Column(Text, nullable=True)
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    type = Column(String(100), nullable=False) # CRITICAL, PRODUCTION, THERMAL, GPS, FINANCIAL
+    status = Column(String(50), default="NEW")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+class ActionNote(Base):
+    __tablename__ = "action_notes"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    alert_id = Column(String(36), ForeignKey("alerts.id"), nullable=True)
+    anomaly_id = Column(String(36), ForeignKey("anomalies.id"), nullable=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    note = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class ThermalRecord(Base):
+    __tablename__ = "thermal_records"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    zone_id = Column(String(36), ForeignKey("zones.id"), nullable=True)
+    temperature_celsius = Column(Float, nullable=False)
+    humidity_percent = Column(Float, nullable=True)
+    recorded_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class AttendanceRecord(Base):
+    __tablename__ = "attendance_records"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    date = Column(DateTime(timezone=True), server_default=func.now())
+    status = Column(String(50), nullable=False) # PRESENT, ABSENT, LATE
+    location_anomaly = Column(Boolean, default=False)
+
+class Forecast(Base):
+    __tablename__ = "forecasts"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    metric_type = Column(String(100), nullable=False) # EGG_PRODUCTION, REVENUE, FEED
+    target_date = Column(DateTime(timezone=True), nullable=False)
+    predicted_value = Column(Float, nullable=False)
+    confidence_lower = Column(Float, nullable=True)
+    confidence_upper = Column(Float, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

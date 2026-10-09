@@ -9,9 +9,14 @@ from ultralytics import YOLO
 # Same settings as the original working code
 # ============================================================
 
-CONF_THRESHOLD = 0.30
+import os
+TRACKER_CFG = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../bytetrack_hen.yaml"))
+if not os.path.exists(TRACKER_CFG):
+    TRACKER_CFG = "bytetrack.yaml"
+
+CONF_THRESHOLD = 0.15
 IOU_THRESHOLD = 0.50
-IMG_SIZE = 1280  # Reverted back to 1280 so tracking works correctly
+IMG_SIZE = 480  # Changed to 480 for FIRE FAST tracking on CPU
 
 MAX_LOST_FRAMES = 180
 
@@ -48,7 +53,7 @@ class StableHenTracker:
         self.next_hen_number = 1
 
         # Use 640 on CPU for fast streaming without timeouts, 1280 on GPU
-        self.img_size = 640 if self.device == "cpu" else 1280
+        self.img_size = 480 # Forced to 480 for max speed on CPU
 
     def _is_hen_detection(self, cls: int, conf: float) -> bool:
         if conf < CONF_THRESHOLD:
@@ -180,7 +185,7 @@ class StableHenTracker:
                     imgsz=self.img_size,
                     conf=CONF_THRESHOLD,
                     iou=IOU_THRESHOLD,
-                    tracker="bytetrack.yaml",
+                    tracker=TRACKER_CFG,
                     persist=True,
                     device=self.device,
                     verbose=False,
@@ -274,10 +279,12 @@ class StableHenTracker:
                 annotated     = frame.copy()
                 visible_count = 0
 
+                drawn_hens = set()
                 for det in detections:
                     x1, y1, x2, y2 = det["box"]
                     hen_number      = det["hen_number"]
                     visible_count  += 1
+                    drawn_hens.add(hen_number)
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 3)
                     label = f"HEN {hen_number}"
                     font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2
@@ -285,6 +292,26 @@ class StableHenTracker:
                     ly = max(0, y1 - th - 10)
                     cv2.rectangle(annotated, (x1, ly), (x1 + tw + 10, y1), (0, 255, 0), -1)
                     cv2.putText(annotated, label, (x1 + 5, y1 - 5), font, scale, (0, 0, 0), thick, cv2.LINE_AA)
+
+                # Draw predicted boxes for missing hens
+                for num, data in self.hens.items():
+                    if num not in drawn_hens and data["lost_frames"] > 0 and data["lost_frames"] <= 30:
+                        cx, cy = data["center"]
+                        vx, vy = data["velocity"]
+                        lost = data["lost_frames"]
+                        px = cx + vx * lost
+                        py = cy + vy * lost
+                        bw, bh = 40, 40
+                        x1, y1 = int(px - bw/2), int(py - bh/2)
+                        x2, y2 = int(px + bw/2), int(py + bh/2)
+                        visible_count += 1
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 165, 255), 2)
+                        label = f"HEN {num} (P)"
+                        font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
+                        (tw, th), _ = cv2.getTextSize(label, font, scale, thick)
+                        ly = max(0, y1 - th - 10)
+                        cv2.rectangle(annotated, (x1, ly), (x1 + tw + 10, y1), (0, 165, 255), -1)
+                        cv2.putText(annotated, label, (x1 + 5, y1 - 5), font, scale, (0, 0, 0), thick, cv2.LINE_AA)
 
                 # Info panel
                 current_time = frame_no / fps
@@ -361,7 +388,7 @@ class StableHenTracker:
                     imgsz=self.img_size,
                     conf=CONF_THRESHOLD,
                     iou=IOU_THRESHOLD,
-                    tracker="bytetrack.yaml",
+                    tracker=TRACKER_CFG,
                     persist=True,
                     device=self.device,
                     verbose=False,
@@ -474,10 +501,12 @@ class StableHenTracker:
                 annotated     = frame.copy()
                 visible_count = 0
 
+                drawn_hens = set()
                 for det in detections:
                     x1, y1, x2, y2 = det["box"]
                     hen_number      = det["hen_number"]
                     visible_count  += 1
+                    drawn_hens.add(hen_number)
 
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 3)
 
@@ -495,6 +524,28 @@ class StableHenTracker:
                         annotated, label, (x1 + 5, y1 - 5),
                         font, scale, (0, 0, 0), thickness, cv2.LINE_AA,
                     )
+                    
+                # Draw predicted boxes for missing hens
+                for num, data in self.hens.items():
+                    if num not in drawn_hens and data["lost_frames"] > 0 and data["lost_frames"] <= 30:
+                        cx, cy = data["center"]
+                        vx, vy = data["velocity"]
+                        lost = data["lost_frames"]
+                        px = cx + vx * lost
+                        py = cy + vy * lost
+                        bw, bh = 40, 40
+                        x1, y1 = int(px - bw/2), int(py - bh/2)
+                        x2, y2 = int(px + bw/2), int(py + bh/2)
+                        visible_count += 1
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 165, 255), 2)
+                        label = f"HEN {num} (P)"
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        scale = 0.6
+                        thickness = 2
+                        (tw, th), _ = cv2.getTextSize(label, font, scale, thickness)
+                        ly = max(0, y1 - th - 10)
+                        cv2.rectangle(annotated, (x1, ly), (x1 + tw + 10, y1), (0, 165, 255), -1)
+                        cv2.putText(annotated, label, (x1 + 5, y1 - 5), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
 
                 # Info panel
                 current_time = frame_no / fps
@@ -733,7 +784,7 @@ class StableHenTracker:
                     imgsz=self.img_size,
                     conf=CONF_THRESHOLD,
                     iou=IOU_THRESHOLD,
-                    tracker="bytetrack.yaml",
+                    tracker=TRACKER_CFG,
                     persist=True,
                     device=self.device,
                     verbose=False,
@@ -939,6 +990,8 @@ class StableHenTracker:
         # We skip YOLO processing on 3 out of 4 frames to keep the video
         # running at "normal speed" on CPU, relying on velocity prediction!
         PROCESS_EVERY_N_FRAMES = 4 
+        
+        stream_start_time = time.time()
 
         try:
             while True:
@@ -957,7 +1010,7 @@ class StableHenTracker:
                     imgsz=IMG_SIZE,
                     conf=CONF_THRESHOLD,
                     iou=IOU_THRESHOLD,
-                    tracker="bytetrack.yaml",
+                    tracker=TRACKER_CFG,
                     persist=True,
                     device=self.device,
                     verbose=False
@@ -1072,11 +1125,12 @@ class StableHenTracker:
                     # Yield data for the WebSocket!
                     yield b64_str, counts_dict[job_id]["visible_hens"], counts_dict[job_id]["total_hens"]
                     
-                # To maintain normal speed feeling, sleep slightly if processing was too fast
-                processing_time = time.time() - start_time
-                target_time = 1.0 / fps
-                if processing_time < target_time:
-                    time.sleep(target_time - processing_time)
+                # To maintain normal speed feeling, sleep based on absolute stream time to avoid drift
+                target_elapsed = frame_no / fps
+                actual_elapsed = time.time() - stream_start_time
+                sleep_time = target_elapsed - actual_elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
 
         finally:
             cap.release()
@@ -1158,7 +1212,7 @@ class StableHenTracker:
 
                     iou=IOU_THRESHOLD,
 
-                    tracker="bytetrack.yaml",
+                    tracker=TRACKER_CFG,
 
                     persist=True,
 

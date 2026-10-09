@@ -1,0 +1,9 @@
+# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Custom ByteTrack configuration for Hen Comb Tracking
+
+tracker_type: bytetrack
+track_high_thresh: 0.15    # Match confidence threshold 0.15 as requested
+track_low_thresh: 0.05
+new_track_thresh: 0.15     # Threshold for creating a new track
+track_buffer: 90           # Keep lost tracks for 90 frames (robust recovery for temporary disappearances)
+match_thresh: 0.8          # Threshold for matching boxes

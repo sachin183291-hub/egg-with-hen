@@ -22,6 +22,7 @@ import json
 def get_model_path():
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
     possible_paths = [
+        os.path.join(base_dir, "best.pt"),
         os.path.join(base_dir, "backend", "best.pt"),
         os.path.join(base_dir, "backend", "yolov8s-world.pt"),
         os.path.join(base_dir, "backend", "yolov8s-worldv2.pt"),

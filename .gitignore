@@ -86,3 +86,9 @@ logs/
 *.sqlite3
 *.db
 *.pt
+*.mp4
+uploads/
+frame_snapshots/
+processed/
+*.jpg
+*.mjs
