@@ -27,11 +27,18 @@ reference_settings = {
 
 # 1. Use the trained HEN_COMB YOLO model
 MODEL_PATH = '/content/gdrive/MyDrive/Poultry_AI_Project/HEN_COMB_1280_TRAINING/hen_comb_1280_100ep/weights/best.pt'
+_this_dir = os.path.dirname(os.path.abspath(__file__))
 if not os.path.exists(MODEL_PATH):
-    local_fallback = os.path.join('backend', 'best.pt')
-    if os.path.exists(local_fallback):
-        MODEL_PATH = local_fallback
-    elif os.path.exists('yolov8n.pt'):
+    possible_paths = [
+        os.path.join(_this_dir, 'backend', 'best.pt'),
+        os.path.join(_this_dir, 'best.pt'),
+        'best.pt'
+    ]
+    for p in possible_paths:
+        if os.path.exists(p):
+            MODEL_PATH = p
+            break
+    else:
         MODEL_PATH = 'yolov8n.pt'
 
 print(f"Loading YOLO model from {MODEL_PATH}...")
