@@ -142,8 +142,8 @@ def _sync_generate_frames(video_source, ref_settings):
                     x1, y1, x2, y2 = map(int, box)
                     w, h = x2 - x1, y2 - y1
                     if w <= 0 or h <= 0: continue
-                    # Size filter: A comb is small. If it's too big, it's a body false positive!
-                    if w > 150 or h > 150: continue 
+                    # Size filter: Disabled to ensure bounding boxes show up for all video scales
+                    # if w > 150 or h > 150: continue 
                     
                     raw_dets.append({
                         "box": (x1, y1, x2, y2),
