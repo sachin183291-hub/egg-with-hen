@@ -106,6 +106,13 @@ async def tracker_stop_stream():
         flask_app.active_stream = None
     return {"success": True}
 
+@router.get("/stream_count")
+async def tracker_stream_count():
+    count = 0
+    if flask_app and hasattr(flask_app, 'current_total_count'):
+        count = flask_app.current_total_count
+    return {"success": True, "count": count}
+
 @router.get("/stream_video/{filename}")
 async def stream_video_file(filename: str):
     filepath = os.path.join("uploads", filename)

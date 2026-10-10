@@ -25,6 +25,8 @@ reference_settings = {
     'reference_video': None
 }
 
+current_total_count = 0
+
 # 1. Use the trained HEN_COMB YOLO model
 MODEL_PATH = '/content/gdrive/MyDrive/Poultry_AI_Project/HEN_COMB_1280_TRAINING/hen_comb_1280_100ep/weights/best.pt'
 _this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -105,6 +107,10 @@ def _sync_generate_frames(video_source, ref_settings):
     next_num = 1
     EMA = 0.4
     total_counted = 0
+    
+    global current_total_count
+    current_total_count = 0
+    
     frame_no = 0
     
     start_time = time.time()
@@ -235,6 +241,9 @@ def _sync_generate_frames(video_source, ref_settings):
                 if not hens[asgn].get("counted", False):
                     hens[asgn]["counted"] = True
                     total_counted += 1
+                    
+                    # Expose to global scope for API polling
+                    current_total_count = total_counted
                     
         # EXACT box drawing logic from analyze_video.py!
         display = frame.copy()

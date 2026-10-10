@@ -19,6 +19,8 @@ interface YoloResult {
   success: boolean
   tray_count: number
   egg_count?: number
+  expected_egg_count?: number
+  missing_egg_count?: number
   hen_count?: number
   confidence: number
   detections: any[]
@@ -1176,8 +1178,21 @@ export default function EggCounterPage() {
                     {target === 'hens' ? (yoloResult.hen_count ?? 0) : (target === 'eggs' ? (yoloResult.egg_count ?? 0) : (yoloResult.tray_count ?? 0))}
                   </div>
                   {target === 'trays' && yoloResult.egg_count !== undefined && yoloResult.egg_count > 0 && (
-                    <div style={{ fontSize: '1rem', color: 'var(--brand-700)', marginTop: 8, fontWeight: 600 }}>
-                      {t('eggCounter.yoloCalculatedEggs', { count: yoloResult.egg_count })}
+                    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ fontSize: '1rem', color: 'var(--brand-700)', fontWeight: 600 }}>
+                        {t('eggCounter.yoloCalculatedEggs', { count: yoloResult.egg_count })}
+                      </div>
+                      
+                      {yoloResult.expected_egg_count !== undefined && yoloResult.expected_egg_count > yoloResult.egg_count && (
+                        <div style={{ display: 'flex', gap: '16px', marginTop: '4px' }}>
+                          <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                            <span style={{ fontWeight: 500 }}>Expected:</span> {yoloResult.expected_egg_count}
+                          </div>
+                          <div style={{ fontSize: '0.9rem', color: 'var(--danger-600)', fontWeight: 600 }}>
+                            <span style={{ fontWeight: 500 }}>Missing (Deducted):</span> {yoloResult.missing_egg_count}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   {target !== 'hens' && yoloResult.egg_count !== undefined && yoloResult.egg_count > 0 && eggCost > 0 && (

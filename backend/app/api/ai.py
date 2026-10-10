@@ -227,12 +227,17 @@ async def count_trays(
             # Count eggs actually detected by YOLO
             detected_eggs = sum(1 for d in filtered_detections if "egg" in d.get("class", "").lower() and "tray" not in d.get("class", "").lower())
             
+            expected_eggs = result["tray_count"] * 30
+            result["expected_egg_count"] = expected_eggs
+            
             # If eggs are detected individually, use that (supports tray deduction of missing eggs).
             # Otherwise, fallback to full trays (30 eggs each).
             if detected_eggs > 0:
                 result["egg_count"] = detected_eggs
+                result["missing_egg_count"] = expected_eggs - detected_eggs if expected_eggs > detected_eggs else 0
             else:
-                result["egg_count"] = result["tray_count"] * 30
+                result["egg_count"] = expected_eggs
+                result["missing_egg_count"] = 0
                 
             result["hen_count"] = 0
         elif target == "hens":

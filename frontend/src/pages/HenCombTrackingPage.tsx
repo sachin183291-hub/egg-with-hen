@@ -6,6 +6,7 @@ export default function HenCombTrackingPage() {
   const [streamMode, setStreamMode] = useState<'camera' | 'video' | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [totalCount, setTotalCount] = useState(0)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
   const backendUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') + '/api/tracker'
@@ -60,10 +61,26 @@ export default function HenCombTrackingPage() {
   const stopStream = async () => {
     setStreamUrl(null)
     setStreamMode(null)
+    setTotalCount(0)
     try {
       await fetch(`${backendUrl}/stop_stream`, { method: 'POST' })
     } catch (e) {}
   }
+
+  // Poll for the total count when streaming
+  React.useEffect(() => {
+    if (!streamUrl) return
+    const interval = setInterval(async () => {
+      try {
+        const resp = await fetch(`${backendUrl}/stream_count`)
+        const data = await resp.json()
+        if (data.success) {
+          setTotalCount(data.count)
+        }
+      } catch (e) {}
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [streamUrl, backendUrl])
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '20px' }}>
@@ -128,9 +145,15 @@ export default function HenCombTrackingPage() {
                 {streamMode === 'camera' ? 'LIVE CAMERA STREAM' : 'AI PROCESSED VIDEO'}
               </h3>
             </div>
-            <button onClick={stopStream} style={{ padding: '10px 24px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}>
-              Close
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <div style={{ padding: '8px 16px', background: 'rgba(16,185,129,0.15)', border: '2px solid rgba(16,185,129,0.5)', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: '1rem', color: '#94a3b8', fontWeight: 600 }}>Total Hens:</span>
+                <span style={{ fontSize: '1.5rem', color: '#10b981', fontWeight: 800 }}>{totalCount}</span>
+              </div>
+              <button onClick={stopStream} style={{ padding: '10px 24px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}>
+                Close
+              </button>
+            </div>
           </div>
           
           <div style={{ borderRadius: 16, overflow: 'hidden', border: '2px solid rgba(16,185,129,0.25)', background: '#000', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
