@@ -8,7 +8,7 @@ export default function HenCombTrackingPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const backendUrl = (import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5000`).replace(/\/$/, '') + '/api/tracker'
+  const backendUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') + '/api/tracker'
 
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

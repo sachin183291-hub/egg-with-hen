@@ -112,11 +112,8 @@ def _sync_generate_frames(video_source, ref_settings):
                 time.sleep((frame_no - target_frame) / fps)
             elif target_frame > frame_no:
                 skip_frames = target_frame - frame_no
-                if skip_frames < 10:
-                    for _ in range(skip_frames):
-                        cap.grab()
-                else:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                for _ in range(skip_frames):
+                    cap.grab()
                 frame_no = target_frame
                 
         ret, frame = cap.read()
@@ -395,28 +392,35 @@ def upload_reference():
     
     global reference_settings
     try:
-        # Analyze it for parameters
+        # Analyze it for parameters synchronously (should be relatively fast for small sample)
         analyze_reference_video(filepath)
         reference_settings['reference_video'] = filename
-        
-        # Now run FastHenTracker to generate the _output.mp4 video with boxes!
-        # This uses the EXACT logic from fast_tracker.py that the user liked.
-        import sys
-        if os.path.abspath('backend') not in sys.path:
-            sys.path.append(os.path.abspath('backend'))
-        from app.ai.tracking import process_video
-        
-        # Process the video; this creates filepath_output.mp4
-        process_video(filepath)
         
         output_filename = filename.replace(".mp4", "_output.mp4").replace(".MP4", "_output.mp4")
         if "_output" not in output_filename:
             output_filename += "_output.mp4"
             
+        def background_process_reference():
+            try:
+                import sys
+                if os.path.abspath('backend') not in sys.path:
+                    sys.path.append(os.path.abspath('backend'))
+                from app.ai.tracking import process_video
+                
+                # Process the video; this creates filepath_output.mp4
+                process_video(filepath)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+        
+        # Run process_video in the background so upload doesn't hang
+        threading.Thread(target=background_process_reference).start()
+        
         return jsonify({
             "success": True,
             "filename": output_filename,
-            "stats": reference_settings
+            "stats": reference_settings,
+            "message": "Video uploaded and is processing in the background."
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
