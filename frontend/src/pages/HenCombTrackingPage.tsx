@@ -1,484 +1,154 @@
-import { useState, useEffect, useRef } from 'react'
-import { Activity, UploadCloud, Video, RefreshCw, Layers } from 'lucide-react'
+import React, { useState, useRef } from 'react'
+import { Camera, Upload, RefreshCw, FileVideo } from 'lucide-react'
 
 export default function HenCombTrackingPage() {
-  const [totalHens, setTotalHens] = useState(0)
-  const [visibleHens, setVisibleHens] = useState(0)
-  const [statusText, setStatusText] = useState('Select a video or start camera.')
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
+  const [streamMode, setStreamMode] = useState<'camera' | 'video' | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
   
-  const [isLiveMode, setIsLiveMode] = useState(false)
-  const [isCameraOpen, setIsCameraOpen] = useState(false)
-  const [hasVideoUrl, setHasVideoUrl] = useState(false)
-
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const overlayRef = useRef<HTMLCanvasElement | null>(null)
-  const captureRef = useRef<HTMLCanvasElement | null>(null)
-  
-  const wsRef = useRef<WebSocket | null>(null)
-  
-  const runningRef = useRef(false)
-  const sendingRef = useRef(false)
-  const sendTimeoutRef = useRef<number | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const animationIdRef = useRef<number | null>(null)
-  const frameNumberRef = useRef(0)
-  const lastSendRef = useRef(0)
-  
-  const latestResultsRef = useRef<any[]>([])
-  const latestResultTimeRef = useRef(0)
-  const previousRef = useRef<any>({})
-  const velocitiesRef = useRef<any>({})
-  
-  const SEND_FPS = 12
-
-  useEffect(() => {
-    captureRef.current = document.createElement('canvas')
-    
-    const handleResize = () => {
-      if (videoRef.current && overlayRef.current) {
-        overlayRef.current.width = videoRef.current.clientWidth
-        overlayRef.current.height = videoRef.current.clientHeight
-      }
-    }
-    window.addEventListener('resize', handleResize)
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      stopCamera()
-    }
-  }, [])
-
-  const resetLocal = () => {
-    latestResultsRef.current = []
-    latestResultTimeRef.current = 0
-    previousRef.current = {}
-    velocitiesRef.current = {}
-    frameNumberRef.current = 0
-    lastSendRef.current = 0
-    setTotalHens(0)
-    setVisibleHens(0)
-    if (overlayRef.current) {
-      const ctx = overlayRef.current.getContext('2d')
-      ctx?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height)
-    }
-  }
-
-  const resetAIBackend = async () => {
-    try {
-      const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-      await fetch(`${apiUrl}/api/tracker/reset`, { method: 'POST' })
-    } catch (e) {}
-  }
-
-
-  const contentRect = () => {
-    const video = videoRef.current
-    if (!video) return { x: 0, y: 0, width: 0, height: 0 }
-    const dw = video.clientWidth
-    const dh = video.clientHeight
-    const sw = video.videoWidth
-    const sh = video.videoHeight
-    if (!dw || !dh || !sw || !sh) return { x: 0, y: 0, width: dw, height: dh }
-
-    const sourceRatio = sw / sh
-    const displayRatio = dw / dh
-    if (sourceRatio > displayRatio) {
-      const width = dw
-      const height = width / sourceRatio
-      return { x: 0, y: (dh - height) / 2, width, height }
-    }
-    const height = dh
-    const width = height * sourceRatio
-    return { x: (dw - width) / 2, y: 0, width, height }
-  }
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const backendUrl = (import.meta.env.VITE_API_URL || `http://${window.location.hostname}:5000`).replace(/\/$/, '') + '/api/tracker'
 
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    stopCamera()
-    resetLocal()
-    setStatusText('Loading video locally...')
+    
+    setIsProcessing(true)
+    setErrorMsg(null)
+    const formData = new FormData()
+    formData.append('file', file)
     
     try {
-      await resetAIBackend()
+      // 1. Upload video
+      const uploadResp = await fetch(`${backendUrl}/upload`, { method: 'POST', body: formData })
+      const uploadData = await uploadResp.json()
       
-      const url = URL.createObjectURL(file)
-      if (videoRef.current) {
-        videoRef.current.srcObject = null
-        videoRef.current.controls = true
-        videoRef.current.muted = true
-        videoRef.current.onloadedmetadata = async () => {
-          if (videoRef.current && overlayRef.current) {
-            overlayRef.current.width = videoRef.current.clientWidth
-            overlayRef.current.height = videoRef.current.clientHeight
-          }
-          // DO NOT play the video automatically. We will control the frames for perfect AI sync!
-          videoRef.current?.pause() 
-          runningRef.current = true
-          setHasVideoUrl(true)
-          setStatusText('🟢 AI SYNC MODE (Perfect Tracking)')
-          processSyncLoop()
-        }
-        videoRef.current.src = url
+      if (uploadData.success) {
+        // Instantly stream the uploaded video LIVE with AI detections
+        setStreamUrl(`${backendUrl}/stream_video/${uploadData.filename}?t=${Date.now()}`)
+        setStreamMode('camera') // Uses <img> tag for MJPEG streaming
+      } else {
+        setErrorMsg('Upload failed: ' + uploadData.error)
       }
     } catch (err: any) {
-      setStatusText('❌ ' + err.message)
-    }
-  }
-
-  const processSyncLoop = async () => {
-    if (!runningRef.current || !videoRef.current) return
-    const video = videoRef.current
-    
-    // Draw current state
-    draw()
-    
-    if (video.currentTime >= video.duration) {
-      setStatusText('✅ Video processing complete.')
-      return
-    }
-
-    // Capture and send frame
-    await sendFrame(frameNumberRef.current + 1)
-    frameNumberRef.current++
-
-    // Advance video by 1/15th of a second (15 FPS)
-    video.currentTime += 1 / 15
-    
-    // Wait for the video to seek to the new frame before continuing
-    video.addEventListener('seeked', function onSeeked() {
-      video.removeEventListener('seeked', onSeeked)
-      if (runningRef.current) {
-        requestAnimationFrame(processSyncLoop)
-      }
-    }, { once: true })
-  }
-
-  const startCamera = async () => {
-    stopCamera()
-    resetLocal()
-    setIsLiveMode(true)
-    setStatusText('📷 Opening Camera...')
-    try {
-      await resetAIBackend()
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.controls = false
-        videoRef.current.muted = true
-        videoRef.current.onloadedmetadata = async () => {
-          if (videoRef.current && overlayRef.current) {
-            overlayRef.current.width = videoRef.current.clientWidth
-            overlayRef.current.height = videoRef.current.clientHeight
-          }
-          try { await videoRef.current?.play() } catch (e) {}
-          runningRef.current = true
-          setIsCameraOpen(true)
-          setStatusText('📷 CAMERA + AI LIVE')
-          startLoop()
-        }
-        videoRef.current.srcObject = stream
-        videoRef.current.src = ""
-      }
-    } catch (err: any) {
-      setStatusText('❌ Camera error: ' + err.message)
-    }
-  }
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop())
-      streamRef.current = null
-    }
-    runningRef.current = false
-    setIsLiveMode(false)
-    setIsCameraOpen(false)
-    setHasVideoUrl(false)
-    if (animationIdRef.current) {
-      cancelAnimationFrame(animationIdRef.current)
-      animationIdRef.current = null
-    }
-    if (videoRef.current) {
-      videoRef.current.pause()
-      videoRef.current.srcObject = null
-      videoRef.current.src = ""
-    }
-  }
-
-  const resetAI = () => {
-    stopCamera()
-    resetLocal()
-    resetAIBackend()
-    setStatusText('🔄 Reset complete.')
-  }
-
-  const startLoop = () => {
-    if (animationIdRef.current) cancelAnimationFrame(animationIdRef.current)
-
-    const loop = (timestamp: number) => {
-      if (!runningRef.current) return
-      draw()
-      
-      const video = videoRef.current
-      if (video && video.readyState >= 2 && !video.paused && !video.ended) {
-        if (timestamp - lastSendRef.current >= 1000 / SEND_FPS) {
-          lastSendRef.current = timestamp
-          frameNumberRef.current++
-          if (!sendingRef.current) {
-            sendFrame(frameNumberRef.current)
-          }
-        }
-      }
-      animationIdRef.current = requestAnimationFrame(loop)
-    }
-    animationIdRef.current = requestAnimationFrame(loop)
-  }
-
-  const sendFrame = async (number: number) => {
-    const video = videoRef.current
-    const capture = captureRef.current
-    if (sendingRef.current || !video || !video.videoWidth || !capture) return
-
-    sendingRef.current = true
-
-    try {
-      capture.width = video.videoWidth
-      capture.height = video.videoHeight
-      const ctx = capture.getContext('2d')
-      ctx?.drawImage(video, 0, 0, capture.width, capture.height)
-      
-      const blob = await new Promise<Blob | null>(resolve => capture.toBlob(resolve, 'image/jpeg', 0.82))
-      if (!blob) {
-        sendingRef.current = false
-        return
-      }
-
-      const form = new FormData()
-      form.append('frame', blob, 'frame.jpg')
-      form.append('frame_number', String(number))
-      form.append('video_time', String(video.currentTime || 0))
-
-      const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
-      const response = await fetch(`${apiUrl}/api/tracker/live_frame`, {
-        method: 'POST',
-        body: form
-      })
-      const data = await response.json()
-      if (data.success) {
-        updateResults(data)
-      }
-    } catch (e) {
-      console.warn(e)
+      setErrorMsg('Error: ' + err.message)
     } finally {
-      sendingRef.current = false
+      setIsProcessing(false)
     }
   }
 
-  const updateResults = (data: any) => {
-    const detections = data.detections || []
-    const video_time = Number(data.video_time || 0)
-    latestResultsRef.current = detections
-    latestResultTimeRef.current = video_time
-    
-    setTotalHens(data.total_hens || 0)
-    setVisibleHens(data.visible_hens || detections.length)
-    setStatusText(`🟢 AI LIVE | UNIQUE HENS: ${data.total_hens || 0}`)
-
-    const newPrevious: any = {}
-    const newVelocities: any = {}
-
-    for (const item of detections) {
-      const number = item.hen_number
-      const box = item.box
-      const old = previousRef.current[number]
-      let vx = 0
-      let vy = 0
-
-      if (old && video_time > old.time) {
-        const dt = Math.max(0.001, video_time - old.time)
-        const oldCX = (old.box[0] + old.box[2]) / 2
-        const oldCY = (old.box[1] + old.box[3]) / 2
-        const newCX = (box[0] + box[2]) / 2
-        const newCY = (box[1] + box[3]) / 2
-        vx = (newCX - oldCX) / dt
-        vy = (newCY - oldCY) / dt
-        vx = Math.max(-2500, Math.min(2500, vx))
-        vy = Math.max(-2500, Math.min(2500, vy))
+  const startLiveCamera = async () => {
+    try {
+      const resp = await fetch(`${backendUrl}/start_stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_source: 'camera' })
+      })
+      const data = await resp.json()
+      if (data.success) {
+        setStreamUrl(`${backendUrl}/stream_video?t=${Date.now()}`)
+        setStreamMode('camera')
+      } else {
+        setErrorMsg('Failed to start camera: ' + data.error)
       }
-      newPrevious[number] = { box, time: video_time }
-      newVelocities[number] = { vx, vy }
+    } catch (err: any) {
+      setErrorMsg('Error starting camera: ' + err.message)
     }
-    previousRef.current = newPrevious
-    velocitiesRef.current = newVelocities
   }
 
-  const draw = () => {
-    const video = videoRef.current
-    const overlay = overlayRef.current
-    if (!video || !overlay) return
-    
-    if (overlay.width !== video.clientWidth || overlay.height !== video.clientHeight) {
-      overlay.width = video.clientWidth
-      overlay.height = video.clientHeight
-    }
-    
-    const ctx = overlay.getContext('2d')
-    if (!ctx) return
-    ctx.clearRect(0, 0, overlay.width, overlay.height)
-
-    const detections = latestResultsRef.current
-    if (!detections.length || !video.videoWidth) return
-
-    const rect = contentRect()
-    const sx = rect.width / video.videoWidth
-    const sy = rect.height / video.videoHeight
-    const age = Math.min(0.50, Math.max(0, (video.currentTime || 0) - latestResultTimeRef.current))
-
-    let visibleCount = 0
-
-    // Draw bounding boxes
-    for (const item of detections) {
-      let box = [...item.box]
-      const velocity = velocitiesRef.current[item.hen_number]
-      
-      if (velocity && age > 0) {
-        box[0] += velocity.vx * age
-        box[1] += velocity.vy * age
-        box[2] += velocity.vx * age
-        box[3] += velocity.vy * age
-      }
-
-      const x = rect.x + box[0] * sx
-      const y = rect.y + box[1] * sy
-      const width = (box[2] - box[0]) * sx
-      const height = (box[3] - box[1]) * sy
-
-      if (width <= 0 || height <= 0) continue
-      
-      visibleCount++
-
-      // Draw box
-      ctx.strokeStyle = item.predicted ? '#ffa500' : '#00ff00' // Orange for predicted, Green for normal
-      ctx.lineWidth = item.predicted ? 2 : 3
-      ctx.strokeRect(x, y, width, height)
-
-      // Draw label
-      const label = item.predicted ? `COMB ${item.hen_number} (P)` : `COMB ${item.hen_number}`
-      ctx.font = 'bold 15px Arial'
-      const textWidth = ctx.measureText(label).width
-      const labelY = Math.max(0, y - 22)
-      
-      ctx.fillStyle = item.predicted ? '#ffa500' : '#00ff00'
-      ctx.fillRect(x, labelY, textWidth + 10, 22)
-      
-      ctx.fillStyle = '#000000'
-      ctx.fillText(label, x + 5, labelY + 16)
-    }
-
-    // Draw the Black Info Panel exactly like the video
-    // Scale panel size based on video width for responsiveness
-    const scale = Math.max(0.6, rect.width / 1280)
-    
-    ctx.fillStyle = '#000000' // Black background
-    ctx.fillRect(rect.x + 20 * scale, rect.y + 20 * scale, 350 * scale, 150 * scale)
-
-    // TIME
-    ctx.font = `bold ${24 * scale}px Arial`
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(`TIME: ${(video.currentTime || 0).toFixed(1)}s`, rect.x + 35 * scale, rect.y + 60 * scale)
-
-    // VISIBLE HENS
-    ctx.fillStyle = '#00ff00'
-    ctx.fillText(`VISIBLE COMBS: ${visibleCount}`, rect.x + 35 * scale, rect.y + 105 * scale)
-
-    // TOTAL HENS
-    ctx.font = `900 ${28 * scale}px Arial`
-    ctx.fillStyle = '#00ffff' // Yellow/Cyan depending on video, stable_tracker used (0,255,255) in BGR which is Yellow
-    ctx.fillText(`TOTAL COMBS: ${totalHens}`, rect.x + 35 * scale, rect.y + 155 * scale)
+  const stopStream = async () => {
+    setStreamUrl(null)
+    setStreamMode(null)
+    try {
+      await fetch(`${backendUrl}/stop_stream`, { method: 'POST' })
+    } catch (e) {}
   }
 
   return (
-    <div className="page-container page-with-bg" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.65),rgba(255,255,255,0.65)),url('/thermal-bg.jpg')", backgroundSize: 'cover', backgroundPosition: 'center' }}>
-      <header className="page-header" style={{ marginBottom: '32px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div className="page-icon-wrapper" style={{ background: '#3b82f6' }}>
-            <Layers size={20} color="white" />
-          </div>
-          <div>
-            <h1 className="page-title">Live Hen Comb Tracking</h1>
-            <p className="page-subtitle">Upload a video — AI tracks every hen comb and streams it at normal video speed.</p>
-          </div>
+    <div style={{ maxWidth: 1000, margin: '0 auto', padding: '20px' }}>
+      <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 8, color: '#f8fafc', textAlign: 'center' }}>
+        Live AI Streaming
+      </h2>
+      <p style={{ color: '#94a3b8', textAlign: 'center', marginBottom: 40, fontSize: '1.05rem' }}>
+        Upload a video for ultra-smooth AI tracking at normal speed
+      </p>
+
+      {errorMsg && (
+        <div style={{ padding: '16px 20px', background: 'rgba(239,68,68,0.1)', borderLeft: '4px solid #ef4444', borderRadius: 8, color: '#fca5a5', marginBottom: 20 }}>
+          {errorMsg}
         </div>
-      </header>
+      )}
 
-      <div style={{ display: 'flex', flexDirection: 'row', gap: '24px', flexWrap: 'wrap' }}>
-        <div className="card" style={{ flex: '1 1 60%', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Video size={20} className="text-brand" />
-            {(hasVideoUrl || isCameraOpen) ? 'ML Tracking — Live Stream' : 'Start Tracking'}
-          </h3>
-
-          {!hasVideoUrl && !isLiveMode && (
-            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px' }}>
-                <UploadCloud size={52} color="var(--brand-400)" style={{ marginBottom: '16px' }} />
-                <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>Upload Video</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>AI processes every frame.</span>
-                <input type="file" accept="video/*" onChange={handleVideoUpload} style={{ display: 'none' }} />
-              </label>
-
-              <div onClick={startCamera} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px' }}>
-                <Video size={52} color="#22c55e" style={{ marginBottom: '16px' }} />
-                <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>Start Live Video</span>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>Track hen combs live using your camera.</span>
+      {!streamUrl ? (
+        <div className="card" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: 30, color: '#f8fafc' }}>Select Stream Source</h3>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, width: '100%', maxWidth: 700 }}>
+            <div 
+              className="ref-mode-btn"
+              onClick={() => { if(!isProcessing) fileInputRef.current?.click() }}
+              style={{ padding: '36px 20px', borderRadius: 16, border: '2px dashed rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.05)', cursor: isProcessing ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, transition: 'all 0.3s' }}
+            >
+              <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg,#10b981,#059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(16,185,129,0.4)' }}>
+                {isProcessing ? <RefreshCw className="animate-spin" size={30} color="white" /> : <Upload size={30} color="white" />}
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc' }}>
+                  {isProcessing ? 'Upload Complete! AI is Processing...' : 'Upload Video'}
+                </div>
+                <div style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: 6 }}>
+                  {isProcessing ? 'Please wait 1-2 minutes while AI tracks hens frame-by-frame' : 'Processes and plays at perfect normal speed'}
+                </div>
               </div>
             </div>
-          )}
+            <input type="file" ref={fileInputRef} onChange={handleVideoUpload} accept="video/mp4,video/x-m4v,video/*" style={{ display: 'none' }} />
 
-          <div style={{ display: (hasVideoUrl || isCameraOpen) ? 'block' : 'none', position: 'relative', borderRadius: '12px', overflow: 'hidden', border: `2px solid #3b82f6`, background: '#000' }}>
-            <video ref={videoRef} playsInline style={{ display: 'block', width: '100%', height: 'auto', maxHeight: '550px', objectFit: 'contain' }} />
-            <canvas ref={overlayRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
-            
-            <button onClick={resetAI} style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <RefreshCw size={18} />
+            <div 
+              className="ref-mode-btn"
+              onClick={startLiveCamera}
+              style={{ padding: '36px 20px', borderRadius: 16, border: '2px solid rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, transition: 'all 0.3s' }}
+            >
+              <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg,#3b82f6,#1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(59,130,246,0.4)' }}>
+                <Camera size={30} color="white" />
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc' }}>Live Camera</div>
+                <div style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: 6 }}>Real-time streaming via webcam</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 14, height: 14, borderRadius: '50%', background: streamMode === 'camera' ? '#ef4444' : '#10b981', animation: streamMode === 'camera' ? 'live-pulse 1.2s infinite' : 'none', boxShadow: streamMode === 'video' ? '0 0 10px #10b981' : 'none' }} />
+              <h3 style={{ fontSize: '1.3rem', fontWeight: 700, color: streamMode === 'camera' ? '#ef4444' : '#10b981', margin: 0 }}>
+                {streamMode === 'camera' ? 'LIVE CAMERA STREAM' : 'AI PROCESSED VIDEO'}
+              </h3>
+            </div>
+            <button onClick={stopStream} style={{ padding: '10px 24px', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}>
+              Close
             </button>
           </div>
-
-          {(hasVideoUrl || isCameraOpen) && (
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
-              <button 
-                onClick={resetAI} 
-                style={{ background: '#ef4444', color: '#fff', padding: '12px 32px', borderRadius: '8px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', cursor: 'pointer', display: 'flex', gap: '8px', alignItems: 'center' }}
-              >
-                <RefreshCw size={20} />
-                Stop Live Video
-              </button>
-            </div>
-          )}
-
-          <div style={{ padding: '14px', background: 'rgba(34,197,94,0.1)', color: '#22c55e', borderRadius: '10px' }}>
-            {statusText}
-          </div>
-        </div>
-
-        <div className="card" style={{ flex: '1 1 30%', padding: '24px', display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px' }}>
-            <Activity size={20} className="text-brand" />
-            Live Count
-          </h3>
           
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', flex: 1, gap: '24px' }}>
-            <div style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.2)', padding: '32px', borderRadius: '16px', textAlign: 'center' }}>
-              <div style={{ fontSize: '1rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '600', marginBottom: '12px' }}>Total Combs (Live)</div>
-              <div style={{ fontSize: '6rem', fontWeight: '900', color: '#3b82f6', lineHeight: 1 }}>{totalHens}</div>
-            </div>
-
-            <div style={{ background: 'rgba(255,255,255,0.5)', border: '1px solid var(--border)', padding: '24px', borderRadius: '16px', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: '600', marginBottom: '12px' }}>Currently Visible</div>
-              <div style={{ fontSize: '3rem', fontWeight: '700', color: 'var(--text-primary)', lineHeight: 1 }}>{visibleHens}</div>
-            </div>
+          <div style={{ borderRadius: 16, overflow: 'hidden', border: '2px solid rgba(16,185,129,0.25)', background: '#000', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+            {streamMode === 'camera' ? (
+              <img src={streamUrl} style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain' }} alt="AI Stream" />
+            ) : (
+              <video src={streamUrl} controls autoPlay loop style={{ width: '100%', maxHeight: '75vh', objectFit: 'contain' }} />
+            )}
           </div>
         </div>
-      </div>
+      )}
+
+      <style>{`
+        @keyframes live-pulse { 0%,100% { opacity:1; box-shadow: 0 0 8px #ef4444; } 50% { opacity:0.5; box-shadow: 0 0 18px #ef4444; } }
+        .ref-mode-btn:hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,0.3) !important; }
+        .animate-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   )
 }

@@ -66,3 +66,63 @@ async def reset_tracking():
         global_live_tracker.reset_state()
     return {"success": True}
 
+# ─── Flask Legacy Integration for Hen Comb Tracking ────────────────────────────
+import sys
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from pathlib import Path
+
+base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if base_dir not in sys.path:
+    sys.path.append(base_dir)
+
+try:
+    import flask_app
+except ImportError:
+    flask_app = None
+
+class StreamSource(BaseModel):
+    video_source: str = "camera"
+
+@router.post("/upload")
+async def tracker_upload(file: UploadFile = File(...)):
+    temp_dir = Path("uploads")
+    temp_dir.mkdir(exist_ok=True)
+    filename = file.filename
+    temp_path = temp_dir / filename
+    with open(temp_path, "wb") as buffer:
+        buffer.write(await file.read())
+    return {"success": True, "filename": filename}
+
+@router.post("/start_stream")
+async def tracker_start_stream(source: StreamSource):
+    if flask_app:
+        flask_app.active_stream = source.video_source
+    return {"success": True}
+
+@router.post("/stop_stream")
+async def tracker_stop_stream():
+    if flask_app:
+        flask_app.active_stream = None
+    return {"success": True}
+
+@router.get("/stream_video/{filename}")
+async def stream_video_file(filename: str):
+    filepath = os.path.join("uploads", filename)
+    if not os.path.exists(filepath) or not flask_app:
+        raise HTTPException(status_code=404, detail="Video not found")
+    ref = flask_app.reference_settings if flask_app.reference_settings.get("reference_video") else None
+    return StreamingResponse(
+        flask_app._sync_generate_frames(filepath, ref),
+        media_type='multipart/x-mixed-replace; boundary=frame'
+    )
+
+@router.get("/stream_video")
+async def stream_video_cam():
+    if not flask_app:
+        raise HTTPException(status_code=404, detail="Not supported")
+    ref = flask_app.reference_settings if flask_app.reference_settings.get("reference_video") else None
+    return StreamingResponse(
+        flask_app._sync_generate_frames('camera', ref),
+        media_type='multipart/x-mixed-replace; boundary=frame'
+    )
