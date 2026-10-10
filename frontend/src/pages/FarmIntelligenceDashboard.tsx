@@ -33,14 +33,14 @@ export default function FarmIntelligenceDashboard() {
   }
 
   const statCards = [
-    { label: 'Total Birds', value: kpi.total_hens.toLocaleString(), icon: Activity, color: '#3b82f6', sub: `Unique Tracked: ${kpi.unique_hens.toLocaleString()}` },
-    { label: 'Total Eggs', value: kpi.total_eggs.toLocaleString(), icon: Egg, color: '#f59e0b', sub: `Daily Avg: ${kpi.avg_daily_eggs.toLocaleString()}` },
-    { label: 'Active Alerts', value: kpi.active_alerts.toLocaleString(), icon: AlertTriangle, color: '#ef4444', sub: `${kpi.critical_alerts} Critical` },
-    { label: 'Avg Temperature', value: `${kpi.avg_temp.toFixed(1)}°C`, icon: Thermometer, color: '#10b981', sub: 'Optimal Range' },
-    { label: 'Total Revenue', value: `$${kpi.total_revenue.toLocaleString()}`, icon: DollarSign, color: '#10b981', sub: 'From egg sales' },
-    { label: 'Total Expenses', value: `$${kpi.total_expenses.toLocaleString()}`, icon: TrendingUp, color: '#ef4444', sub: 'Feed, Medical, etc' },
-    { label: 'Net Profit', value: `$${kpi.net_profit.toLocaleString()}`, icon: DollarSign, color: kpi.net_profit >= 0 ? '#10b981' : '#ef4444', sub: kpi.net_profit >= 0 ? 'Profitable' : 'Loss' },
-    { label: 'Cost Per Egg', value: `$${kpi.cost_per_egg.toFixed(2)}`, icon: Activity, color: '#8b5cf6', sub: 'Calculated' },
+    { label: 'Total Birds', value: (kpi.total_hens || 0).toLocaleString(), icon: Activity, color: '#3b82f6', sub: `Unique Tracked: ${(kpi.unique_hens || 0).toLocaleString()}` },
+    { label: 'Total Eggs', value: (kpi.total_eggs || 0).toLocaleString(), icon: Egg, color: '#f59e0b', sub: `Daily Avg: ${(kpi.avg_daily_eggs || 0).toLocaleString()}` },
+    { label: 'Active Alerts', value: (kpi.active_alerts || 0).toLocaleString(), icon: AlertTriangle, color: '#ef4444', sub: `${kpi.critical_alerts || 0} Critical` },
+    { label: 'Avg Temperature', value: `${(kpi.avg_temp || 0).toFixed(1)}°C`, icon: Thermometer, color: '#10b981', sub: 'Optimal Range' },
+    { label: 'Total Revenue', value: `$${(kpi.total_revenue || 0).toLocaleString()}`, icon: DollarSign, color: '#10b981', sub: 'From egg sales' },
+    { label: 'Total Expenses', value: `$${(kpi.total_expenses || 0).toLocaleString()}`, icon: TrendingUp, color: '#ef4444', sub: 'Feed, Medical, etc' },
+    { label: 'Net Profit', value: `$${(kpi.net_profit || 0).toLocaleString()}`, icon: DollarSign, color: (kpi.net_profit || 0) >= 0 ? '#10b981' : '#ef4444', sub: (kpi.net_profit || 0) >= 0 ? 'Profitable' : 'Loss' },
+    { label: 'Cost Per Egg', value: `$${(kpi.cost_per_egg || 0).toFixed(2)}`, icon: Activity, color: '#8b5cf6', sub: 'Calculated' },
   ]
 
   return (
