@@ -43,9 +43,24 @@ else:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+import time
+import sqlalchemy
+
 def create_tables():
     """Create all tables (use Alembic for production migrations)."""
-    Base.metadata.create_all(bind=engine)
+    retries = 5
+    for i in range(retries):
+        try:
+            Base.metadata.create_all(bind=engine)
+            print("[OK] Database tables created successfully.")
+            break
+        except sqlalchemy.exc.OperationalError as e:
+            if i < retries - 1:
+                print(f"[WARNING] Database not ready yet, retrying in 5 seconds... ({i+1}/{retries})")
+                time.sleep(5)
+            else:
+                print("[ERROR] Database failed to start after multiple retries.")
+                raise e
 
 
 def get_db() -> Generator[Session, None, None]:
