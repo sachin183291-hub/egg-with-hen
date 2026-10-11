@@ -86,6 +86,9 @@ logs/
 *.sqlite3
 *.db
 *.pt
+!backend/best.pt
+!backend/app/ai/models/egg_detector.pt
+!backend/yolov8n.pt
 *.mp4
 uploads/
 frame_snapshots/

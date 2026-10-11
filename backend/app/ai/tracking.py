@@ -26,16 +26,19 @@ from typing import Callable, Optional
 #   3. Fallback to generic yolov8n.pt (ultralytics auto-downloads)
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
+_BACKEND_DIR = os.path.abspath(os.path.join(_THIS_DIR, "..", ".."))
+_REPO_ROOT = os.path.abspath(os.path.join(_THIS_DIR, "..", "..", ".."))
 
 _MODEL_CANDIDATES = [
+    os.path.join(_BACKEND_DIR, "best.pt"),
     os.path.join(_REPO_ROOT, "best.pt"),
     os.path.join(_REPO_ROOT, "backend", "best.pt"),
     os.path.join(_REPO_ROOT, "weights", "best.pt"),
-    os.path.join(_REPO_ROOT, "backend", "weights", "best.pt"),
+    os.path.join(_BACKEND_DIR, "weights", "best.pt"),
     os.path.join(_THIS_DIR, "models", "egg_detector.pt"),
     os.path.join(_THIS_DIR, "models", "best.pt"),
     os.path.join(_THIS_DIR, "egg_detector.pt"),
+    os.path.join(_BACKEND_DIR, "yolov8n.pt"),
     "best.pt",
 ]
 _FALLBACK_MODEL = "yolov8n.pt"

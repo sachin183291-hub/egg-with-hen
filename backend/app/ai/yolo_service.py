@@ -7,44 +7,74 @@ from ultralytics import YOLO, YOLOWorld
 
 # Global model instances
 model = None
+egg_model = None
 tray_model = None
+
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "egg_detector.pt")
 ALT_MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../models/best.pt"))
 FALLBACK_MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../yolov8s-world.pt"))
 
 def load_model():
-    global model
-    global tray_model
+    global model, egg_model, tray_model
     if model is None:
         try:
-            if os.path.exists(MODEL_PATH):
-                print(f"Loading custom model from {MODEL_PATH}")
-                model = YOLO(MODEL_PATH)
-            elif os.path.exists(ALT_MODEL_PATH):
-                print(f"Loading custom model from {ALT_MODEL_PATH}")
-                model = YOLO(ALT_MODEL_PATH)
+            # 1. Primary Hen Comb / Custom Model
+            candidate_paths = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../best.pt")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../best.pt")),
+                os.path.abspath(os.path.join(os.getcwd(), "best.pt")),
+                os.path.abspath(os.path.join(os.getcwd(), "backend", "best.pt")),
+                ALT_MODEL_PATH,
+                "best.pt",
+            ]
+            chosen_path = next((p for p in candidate_paths if os.path.exists(p)), None)
+            if chosen_path:
+                print(f"[AI] Loading custom model from {chosen_path}")
+                model = YOLO(chosen_path)
             else:
-                print(f"Custom model not found. Using standard YOLOv8n as fallback.")
-                model = YOLO("yolov8n.pt") 
-                
-            # Check if custom model has tray class or hen class
+                print("[AI] Custom model not found. Using standard YOLOv8n as fallback.")
+                nano_paths = [
+                    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../yolov8n.pt")),
+                    "yolov8n.pt"
+                ]
+                chosen_nano = next((p for p in nano_paths if os.path.exists(p)), "yolov8n.pt")
+                model = YOLO(chosen_nano)
+
+            # 2. Dedicated Egg Detection Model (if available)
+            egg_candidate_paths = [
+                MODEL_PATH,
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../egg-detection-system/backend/models/egg_detector.pt")),
+            ]
+            egg_chosen = next((p for p in egg_candidate_paths if os.path.exists(p)), None)
+            if egg_chosen and egg_chosen != chosen_path:
+                try:
+                    print(f"[AI] Loading dedicated egg detector from {egg_chosen}")
+                    egg_model = YOLO(egg_chosen)
+                except Exception as egg_err:
+                    print(f"[AI] Notice: Could not load egg detector: {egg_err}")
+                    egg_model = None
+
+            # 3. Check if model has tray class or hen class
             has_tray = any("tray" in name.lower() for name in model.names.values())
-            has_hen = any("hen" in name.lower() or "bird" in name.lower() or "chicken" in name.lower() for name in model.names.values())
-            
+            has_hen = any("hen" in name.lower() or "comb" in name.lower() or "bird" in name.lower() or "chicken" in name.lower() for name in model.names.values())
+
             if not has_tray or not has_hen:
                 if os.environ.get("RENDER") == "true":
-                    print("Running on Render. Skipping YOLO-World fallback due to memory limits.")
+                    print("[AI] Running on Render. Skipping heavy YOLO-World fallback to conserve memory.")
                     tray_model = None
                 else:
-                    print("Custom model lacks 'tray' or 'hen' class. Loading YOLO-World for trays and hens.")
+                    print("[AI] Loading YOLO-World for trays and hens.")
                     tray_model_path = FALLBACK_MODEL_PATH if os.path.exists(FALLBACK_MODEL_PATH) else "yolov8s-worldv2.pt"
-                    tray_model = YOLOWorld(tray_model_path)
-                    tray_model.set_classes(["egg tray", "hen"])
-                
-                
+                    if os.path.exists(tray_model_path):
+                        tray_model = YOLOWorld(tray_model_path)
+                        tray_model.set_classes(["egg tray", "hen"])
+                    else:
+                        tray_model = None
+
         except Exception as e:
-            print(f"Error loading model: {e}")
+            print(f"[AI] Error loading model: {e}")
             raise e
+
     return model, tray_model
 
 def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_threshold: float = 0.45) -> dict:
@@ -61,10 +91,21 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
     # Run inference for main model
     results = model_instance(image, conf=conf_threshold, iou=iou_threshold, imgsz=640)
     
+    # Run inference for eggs if dedicated egg model is available
+    egg_results = None
+    if egg_model is not None:
+        try:
+            egg_results = egg_model(image, conf=conf_threshold, iou=iou_threshold, imgsz=640)
+        except Exception:
+            egg_results = None
+
     # Run inference for trays if needed
     tray_results = None
     if tray_model_instance:
-        tray_results = tray_model_instance(image, conf=conf_threshold, iou=iou_threshold, imgsz=640)
+        try:
+            tray_results = tray_model_instance(image, conf=conf_threshold, iou=iou_threshold, imgsz=640)
+        except Exception:
+            tray_results = None
         
     detections = []
     annotated_image = image.copy()
@@ -75,7 +116,7 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
     egg_conf_sum = 0
     tray_conf_sum = 0
     
-    def process_boxes(boxes, class_names, is_tray_only=False):
+    def process_boxes(boxes, class_names, is_tray_only=False, is_egg_only=False):
         nonlocal egg_count, tray_count, hen_count, egg_conf_sum, tray_conf_sum, detections, annotated_image
         for box in boxes:
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
@@ -83,12 +124,12 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
             cls_id = int(box.cls[0].cpu().numpy())
             
             raw_class_name = class_names.get(cls_id, "unknown").lower()
-            if "hen" in raw_class_name or "bird" in raw_class_name or "chicken" in raw_class_name:
-                class_name = "hen"
+            if is_egg_only or "egg" in raw_class_name:
+                class_name = "egg"
             elif is_tray_only or "tray" in raw_class_name:
                 class_name = "egg_tray"
-            elif "egg" in raw_class_name:
-                class_name = "egg"
+            elif any(k in raw_class_name for k in ("hen", "comb", "bird", "chicken")):
+                class_name = "hen"
             else:
                 continue  # Skip everything else
 
@@ -106,7 +147,7 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
             elif class_name == "hen":
                 hen_count += 1
                 color = (0, 0, 255) # Red in BGR
-                label = f"HEN {hen_count}"
+                label = f"HEN/COMB {hen_count}"
                 det_id = hen_count
             elif class_name == "egg":
                 egg_count += 1
@@ -136,8 +177,14 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
 
     # Process main model results
     for result in results:
-        class_names = getattr(result, "names", {0: "egg", 1: "egg_tray"})
+        class_names = getattr(result, "names", {0: "HEN_COMB"})
         process_boxes(result.boxes, class_names)
+
+    # Process dedicated egg model results if present
+    if egg_results:
+        for result in egg_results:
+            class_names = getattr(result, "names", {0: "egg"})
+            process_boxes(result.boxes, class_names, is_egg_only=True)
         
     # Process tray model results if present
     if tray_results:

@@ -21,9 +21,13 @@ class OpticalHenTracker:
         self.model(dummy_img, verbose=False, imgsz=640)
         
         # ByteTrack config
-        self.TRACKER_YAML = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../bytetrack_hen.yaml"))
-        if not os.path.exists(self.TRACKER_YAML):
-            self.TRACKER_YAML = "bytetrack.yaml"
+        possible_yamls = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../bytetrack_hen.yaml")),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../bytetrack_hen.yaml")),
+            os.path.abspath(os.path.join(os.getcwd(), "bytetrack_hen.yaml")),
+            os.path.abspath(os.path.join(os.getcwd(), "backend", "bytetrack_hen.yaml")),
+        ]
+        self.TRACKER_YAML = next((y for y in possible_yamls if os.path.exists(y)), "bytetrack.yaml")
             
         self.state_lock = threading.RLock()
         self.inference_lock = threading.Lock()

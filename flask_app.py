@@ -50,6 +50,13 @@ if not os.path.exists(MODEL_PATH):
     possible_paths = [
         os.path.join(_this_dir, 'backend', 'best.pt'),
         os.path.join(_this_dir, 'best.pt'),
+        os.path.abspath(os.path.join(os.getcwd(), 'best.pt')),
+        os.path.abspath(os.path.join(os.getcwd(), 'backend', 'best.pt')),
+        os.path.abspath(os.path.join(_this_dir, '..', 'backend', 'best.pt')),
+        os.path.abspath(os.path.join(_this_dir, '..', 'best.pt')),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), 'backend', 'best.pt')),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), 'weights', 'best.pt')),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), 'backend', 'weights', 'best.pt')),
         'best.pt'
     ]
     for p in possible_paths:
@@ -57,7 +64,13 @@ if not os.path.exists(MODEL_PATH):
             MODEL_PATH = p
             break
     else:
-        MODEL_PATH = 'yolov8n.pt'
+        nano_paths = [
+            os.path.join(_this_dir, 'backend', 'yolov8n.pt'),
+            os.path.join(_this_dir, 'yolov8n.pt'),
+            os.path.abspath(os.path.join(os.getcwd(), 'yolov8n.pt')),
+            'yolov8n.pt'
+        ]
+        MODEL_PATH = next((p for p in nano_paths if os.path.exists(p)), 'yolov8n.pt')
 
 print(f"Loading YOLO model from {MODEL_PATH}...")
 device = "cuda" if torch.cuda.is_available() else "cpu"
