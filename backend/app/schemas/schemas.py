@@ -3,7 +3,7 @@ Pydantic schemas for all API request/response models.
 """
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, field_validator, model_validator, ConfigDict
 from app.database.models import (
     RoleEnum, DeviceStatusEnum, EvidenceStatusEnum,
     AIStatusEnum, BlockchainStatusEnum, SyncStatusEnum, AuditActionEnum
@@ -170,8 +170,7 @@ class AIVerificationResponse(BaseModel):
     model_version: Optional[str]
     verified_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 
 class BlockchainRecordResponse(BaseModel):

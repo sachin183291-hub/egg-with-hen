@@ -72,21 +72,22 @@ if not os.path.exists(MODEL_PATH):
         ]
         MODEL_PATH = next((p for p in nano_paths if os.path.exists(p)), 'yolov8n.pt')
 
-print(f"Loading YOLO model from {MODEL_PATH}...")
-device = "cuda" if torch.cuda.is_available() else "cpu"
-try:
-    model = YOLO(MODEL_PATH)
-except Exception as e:
-    print(f"Error loading model: {e}")
-    model = None
+model = None
 
-if model is not None:
-    try:
-        _dummy = np.zeros((640, 640, 3), dtype=np.uint8)
-        model.predict(_dummy, imgsz=640, verbose=False)
-        print("YOLO model warmed up successfully.")
-    except Exception as e:
-        print(f"Warmup notice: {e}")
+def get_tracking_model():
+    global model
+    if model is None:
+        try:
+            from app.ai.shared_model import get_shared_model
+            model = get_shared_model(MODEL_PATH)
+        except Exception:
+            try:
+                print(f"[FLASK] Loading model directly from {MODEL_PATH}...")
+                model = YOLO(MODEL_PATH)
+            except Exception as e:
+                print(f"[FLASK] Error loading model: {e}")
+                model = None
+    return model
 
 CONF_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.45
@@ -106,6 +107,7 @@ def generate_frames_with_ref(video_source, ref_settings):
     return _sync_generate_frames(video_source, ref_settings)
 
 def _sync_generate_frames(video_source, ref_settings):
+    model = get_tracking_model()
     is_live = video_source == 'camera' or str(video_source) == '0'
     if is_live:
         # Use DirectShow on Windows for faster webcam init and set buffer to 1 to prevent latency/lag

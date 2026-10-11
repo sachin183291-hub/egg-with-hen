@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import base64
 # pyrefly: ignore [missing-import]
-from ultralytics import YOLO, YOLOWorld
+from ultralytics import YOLO
 
 # Global model instances
 model = None
@@ -18,58 +18,42 @@ def load_model():
     global model, egg_model, tray_model
     if model is None:
         try:
-            # 1. Primary Hen Comb / Custom Model
-            candidate_paths = [
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../best.pt")),
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../best.pt")),
-                os.path.abspath(os.path.join(os.getcwd(), "best.pt")),
-                os.path.abspath(os.path.join(os.getcwd(), "backend", "best.pt")),
-                ALT_MODEL_PATH,
-                "best.pt",
-            ]
-            chosen_path = next((p for p in candidate_paths if os.path.exists(p)), None)
-            if chosen_path:
-                print(f"[AI] Loading custom model from {chosen_path}")
-                model = YOLO(chosen_path)
+            from app.ai.shared_model import get_shared_model
+            model = get_shared_model()
+
+            # In cloud environments (Render, Heroku, or constrained RAM), use the single shared YOLO model
+            is_cloud = bool(os.environ.get("RENDER") or os.environ.get("PORT"))
+            if is_cloud:
+                print("[AI] Cloud environment detected. Using single shared YOLO model under 512MB RAM.")
+                egg_model = None
+                tray_model = None
             else:
-                print("[AI] Custom model not found. Using standard YOLOv8n as fallback.")
-                nano_paths = [
-                    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../yolov8n.pt")),
-                    "yolov8n.pt"
+                # Dedicated Egg Detection Model on local machines if desired
+                egg_candidate_paths = [
+                    MODEL_PATH,
+                    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../egg-detection-system/backend/models/egg_detector.pt")),
                 ]
-                chosen_nano = next((p for p in nano_paths if os.path.exists(p)), "yolov8n.pt")
-                model = YOLO(chosen_nano)
+                egg_chosen = next((p for p in egg_candidate_paths if os.path.exists(p)), None)
+                if egg_chosen:
+                    try:
+                        print(f"[AI] Loading dedicated egg detector from {egg_chosen}")
+                        egg_model = YOLO(egg_chosen)
+                    except Exception as egg_err:
+                        print(f"[AI] Notice: Could not load egg detector: {egg_err}")
+                        egg_model = None
 
-            # 2. Dedicated Egg Detection Model (if available)
-            egg_candidate_paths = [
-                MODEL_PATH,
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../egg-detection-system/backend/models/egg_detector.pt")),
-            ]
-            egg_chosen = next((p for p in egg_candidate_paths if os.path.exists(p)), None)
-            if egg_chosen and egg_chosen != chosen_path:
+            # YOLOWorld fallback is disabled by default to prevent allocating >1GB of CLIP transformer RAM
+            if os.environ.get("ENABLE_YOLO_WORLD", "false").lower() == "true":
                 try:
-                    print(f"[AI] Loading dedicated egg detector from {egg_chosen}")
-                    egg_model = YOLO(egg_chosen)
-                except Exception as egg_err:
-                    print(f"[AI] Notice: Could not load egg detector: {egg_err}")
-                    egg_model = None
-
-            # 3. Check if model has tray class or hen class
-            has_tray = any("tray" in name.lower() for name in model.names.values())
-            has_hen = any("hen" in name.lower() or "comb" in name.lower() or "bird" in name.lower() or "chicken" in name.lower() for name in model.names.values())
-
-            if not has_tray or not has_hen:
-                if os.environ.get("RENDER") == "true":
-                    print("[AI] Running on Render. Skipping heavy YOLO-World fallback to conserve memory.")
-                    tray_model = None
-                else:
+                    from ultralytics import YOLOWorld
                     print("[AI] Loading YOLO-World for trays and hens.")
                     tray_model_path = FALLBACK_MODEL_PATH if os.path.exists(FALLBACK_MODEL_PATH) else "yolov8s-worldv2.pt"
                     if os.path.exists(tray_model_path):
                         tray_model = YOLOWorld(tray_model_path)
                         tray_model.set_classes(["egg tray", "hen"])
-                    else:
-                        tray_model = None
+                except Exception as e:
+                    print(f"[AI] YOLOWorld load notice: {e}")
+                    tray_model = None
 
         except Exception as e:
             print(f"[AI] Error loading model: {e}")

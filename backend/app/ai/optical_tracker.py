@@ -9,16 +9,12 @@ import torch
 from ultralytics import YOLO
 
 class OpticalHenTracker:
-    def __init__(self, model_path):
+    def __init__(self, model_path=None):
         self.MODEL_PATH = model_path
         self.DEVICE = 0 if torch.cuda.is_available() else "cpu"
         
-        print(f"Loading YOLO model from {model_path} on {self.DEVICE}...")
-        self.model = YOLO(model_path)
-        
-        print("Warming up AI model...")
-        dummy_img = np.zeros((640, 640, 3), dtype=np.uint8)
-        self.model(dummy_img, verbose=False, imgsz=640)
+        from app.ai.shared_model import get_shared_model
+        self.model = get_shared_model(model_path)
         
         # ByteTrack config
         possible_yamls = [

@@ -3,6 +3,15 @@ GioTag — Secure Geotagged Photo Capture & Monitoring System
 FastAPI Backend Application
 """
 import os
+import tempfile
+# Low-memory & cloud environment optimizations (Render free tier 512MB RAM)
+os.environ.setdefault("YOLO_CONFIG_DIR", os.path.join(tempfile.gettempdir(), "Ultralytics"))
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 from pathlib import Path
 # pyrefly: ignore [missing-import]
 from fastapi import FastAPI, Request
@@ -117,14 +126,16 @@ async def startup_event():
     except Exception as e:
         print(f"[WARNING] Blockchain init warning: {e}")
 
-    # Preload AI models to eliminate initial delay and prevent timeout errors
+    # Preload shared AI model (singleton pattern - avoids duplicate memory)
     try:
-        from app.ai.yolo_service import load_model
-        print("[START] Preloading YOLO models to ensure 5-10s response time...")
-        load_model()
-        print("[OK] YOLO models preloaded successfully")
+        from app.ai.shared_model import get_shared_model
+        import gc
+        print("[START] Initializing shared singleton YOLO model...")
+        get_shared_model()
+        gc.collect()
+        print("[OK] Shared YOLO model ready")
     except Exception as e:
-        print(f"[WARNING] YOLO model preload failed: {e}")
+        print(f"[WARNING] YOLO model preload note: {e}")
 
     print(f"[START] {settings.APP_NAME} v{settings.APP_VERSION} started ({settings.ENVIRONMENT})")
 

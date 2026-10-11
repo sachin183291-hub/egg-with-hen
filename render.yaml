@@ -9,11 +9,23 @@ services:
     name: giotag-backend
     env: python
     plan: free
-    buildCommand: "cd backend && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements.txt"
+    buildCommand: "cd backend && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && pip install --no-cache-dir -r requirements.txt"
     startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: RENDER
+        value: "true"
+      - key: YOLO_CONFIG_DIR
+        value: /tmp/Ultralytics
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: MKL_NUM_THREADS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      - key: WEB_CONCURRENCY
+        value: "1"
       - key: DATABASE_URL
         fromDatabase:
           name: giotag-db
