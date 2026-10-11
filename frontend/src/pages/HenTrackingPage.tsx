@@ -111,46 +111,39 @@ export default function HenTrackingPage() {
             overlayRef.current.width = videoRef.current.clientWidth
             overlayRef.current.height = videoRef.current.clientHeight
           }
-          // DO NOT play the video automatically. We will control the frames for perfect AI sync!
-          videoRef.current?.pause() 
+          // Play the video at normal 1.0x smooth speed!
+          videoRef.current.playbackRate = 1.0
           runningRef.current = true
           setHasVideoUrl(true)
-          setStatusText('🟢 AI SYNC MODE (Perfect Tracking)')
-          processSyncLoop()
+          setStatusText('🟢 AI LIVE TRACKING (Normal Speed)')
+          startLoop()
+          try {
+            await videoRef.current?.play()
+          } catch (e) {
+            console.log('Autoplay prevented, user can click play')
+          }
         }
+
+        videoRef.current.onplay = () => {
+          if (!runningRef.current) {
+            runningRef.current = true
+            setStatusText('🟢 AI LIVE TRACKING (Normal Speed)')
+            startLoop()
+          }
+        }
+
+        videoRef.current.onseeking = () => {
+          if (videoRef.current && videoRef.current.currentTime < 0.5) {
+            resetAIBackend()
+            frameNumberRef.current = 0
+          }
+        }
+
         videoRef.current.src = url
       }
     } catch (err: any) {
       setStatusText('❌ ' + err.message)
     }
-  }
-
-  const processSyncLoop = async () => {
-    if (!runningRef.current || !videoRef.current) return
-    const video = videoRef.current
-    
-    // Draw current state
-    draw()
-    
-    if (video.currentTime >= video.duration) {
-      setStatusText('✅ Video processing complete.')
-      return
-    }
-
-    // Capture and send frame
-    await sendFrame(frameNumberRef.current + 1)
-    frameNumberRef.current++
-
-    // Advance video by 1/15th of a second (15 FPS)
-    video.currentTime += 1 / 15
-    
-    // Wait for the video to seek to the new frame before continuing
-    video.addEventListener('seeked', function onSeeked() {
-      video.removeEventListener('seeked', onSeeked)
-      if (runningRef.current) {
-        requestAnimationFrame(processSyncLoop)
-      }
-    }, { once: true })
   }
 
   const startCamera = async () => {

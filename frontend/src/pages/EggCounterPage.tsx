@@ -38,6 +38,8 @@ interface OpenAIResult {
   success: boolean
   egg_count: number
   tray_count: number
+  expected_egg_count?: number
+  missing_egg_count?: number
   hen_count?: number
   tray_types: TrayTypes
   confidence: 'high' | 'medium' | 'low'
@@ -867,8 +869,21 @@ export default function EggCounterPage() {
                     {openaiResult.egg_count}
                   </div>
                   {target === 'trays' && (
-                     <div style={{ fontSize: '0.8rem', color: 'var(--brand-700)', marginTop: 8 }}>
-                       {t('eggCounter.calculatedTrays', { count: openaiResult.tray_count })}
+                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginTop: 8 }}>
+                       <div style={{ fontSize: '0.8rem', color: 'var(--brand-700)' }}>
+                         {t('eggCounter.calculatedTrays', { count: openaiResult.tray_count })}
+                       </div>
+                       
+                       {openaiResult.expected_egg_count !== undefined && openaiResult.expected_egg_count > openaiResult.egg_count && (
+                         <div style={{ display: 'flex', gap: '16px', marginTop: '4px' }}>
+                           <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                             <span style={{ fontWeight: 500 }}>Expected:</span> {openaiResult.expected_egg_count}
+                           </div>
+                           <div style={{ fontSize: '0.9rem', color: 'var(--danger-600)', fontWeight: 600 }}>
+                             <span style={{ fontWeight: 500 }}>Missing (Deducted):</span> {openaiResult.missing_egg_count}
+                           </div>
+                         </div>
+                       )}
                      </div>
                   )}
                   {eggCost > 0 && openaiResult.egg_count > 0 && (

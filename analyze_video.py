@@ -42,7 +42,7 @@ det_per_frame = []
 conf_values   = []
 hens          = {}
 next_num      = 1
-EMA           = 0.4
+EMA           = 0.95
 
 frame_no = 0
 while cap.isOpened() and frame_no < limit:

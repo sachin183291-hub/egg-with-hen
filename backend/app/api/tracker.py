@@ -84,6 +84,8 @@ except ImportError:
 class StreamSource(BaseModel):
     video_source: str = "camera"
 
+import shutil
+
 @router.post("/upload")
 async def tracker_upload(file: UploadFile = File(...)):
     temp_dir = Path("uploads")
@@ -91,7 +93,7 @@ async def tracker_upload(file: UploadFile = File(...)):
     filename = file.filename
     temp_path = temp_dir / filename
     with open(temp_path, "wb") as buffer:
-        buffer.write(await file.read())
+        shutil.copyfileobj(file.file, buffer)
     return {"success": True, "filename": filename}
 
 @router.post("/start_stream")

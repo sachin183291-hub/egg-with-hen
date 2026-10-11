@@ -350,9 +350,22 @@ async def analyze_egg_image(
         detector = get_detector()
         analysis = detector.analyze(image_bytes, content_type, target)
         
-        # Override calculation if user selected trays
+        # Calculate expected and missing eggs for deduction logic if user selected trays
         if target == "trays" and analysis.get("success"):
-            analysis["egg_count"] = analysis.get("tray_count", 0) * 30
+            tray_count = analysis.get("tray_count", 0)
+            expected_eggs = tray_count * 30
+            analysis["expected_egg_count"] = expected_eggs
+            
+            # OpenAI natively returns BOTH egg_count and tray_count in the same response
+            detected_eggs = analysis.get("egg_count", 0)
+            
+            # If the model explicitly counted individual eggs, calculate deduction
+            if detected_eggs > 0:
+                analysis["egg_count"] = detected_eggs
+                analysis["missing_egg_count"] = expected_eggs - detected_eggs if expected_eggs > detected_eggs else 0
+            else:
+                analysis["egg_count"] = expected_eggs
+                analysis["missing_egg_count"] = 0
             
         return analysis
     except RuntimeError as exc:

@@ -92,3 +92,7 @@ frame_snapshots/
 processed/
 *.jpg
 *.mjs
+scratch/
+**/ledger_data.json
+test_mnn.py
+
