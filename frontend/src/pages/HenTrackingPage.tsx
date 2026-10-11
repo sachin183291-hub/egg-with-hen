@@ -107,18 +107,20 @@ export default function HenTrackingPage() {
         videoRef.current.controls = true
         videoRef.current.muted = true
         videoRef.current.onloadedmetadata = async () => {
-          if (videoRef.current && overlayRef.current) {
-            overlayRef.current.width = videoRef.current.clientWidth
-            overlayRef.current.height = videoRef.current.clientHeight
+          const video = videoRef.current
+          if (!video) return
+          if (overlayRef.current) {
+            overlayRef.current.width = video.clientWidth
+            overlayRef.current.height = video.clientHeight
           }
           // Play the video at normal 1.0x smooth speed!
-          videoRef.current.playbackRate = 1.0
+          video.playbackRate = 1.0
           runningRef.current = true
           setHasVideoUrl(true)
           setStatusText('🟢 AI LIVE TRACKING (Normal Speed)')
           startLoop()
           try {
-            await videoRef.current?.play()
+            await video.play()
           } catch (e) {
             console.log('Autoplay prevented, user can click play')
           }
