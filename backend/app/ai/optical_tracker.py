@@ -177,7 +177,7 @@ class OpticalHenTracker:
 
             with self.state_lock:
                 # ─── 3. Mutual Nearest Neighbor (MNN) Matching ───
-                MAX_MATCH_DIST = 90.0
+                MAX_MATCH_DIST = 125.0
                 det_to_hen = {}
                 for d_idx, det in enumerate(detections):
                     cx, cy = det["center"]
@@ -256,7 +256,7 @@ class OpticalHenTracker:
                     for num, data in self.hens.items():
                         if num in used_hens or data["lost_frames"] > 45: continue
                         d = math.hypot(center[0] - data["center"][0], center[1] - data["center"][1])
-                        if d <= 100.0 and d < closest_dist:
+                        if d <= 125.0 and d < closest_dist:
                             closest_dist = d
                             reassigned_num = num
 

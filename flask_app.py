@@ -8,7 +8,11 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import cv2
 import torch
-torch.set_num_threads(4)
+torch.set_num_threads(2)
+try:
+    torch.set_num_interop_threads(1)
+except Exception:
+    pass
 import numpy as np
 from ultralytics import YOLO
 
@@ -19,9 +23,9 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Global reference video settings (learned from uploaded reference video)
 reference_settings = {
-    'roi_y1_pct': 0.15,
-    'roi_y2_pct': 0.85,
-    'conf_threshold': 0.40,
+    'roi_y1_pct': 0.10,
+    'roi_y2_pct': 0.88,
+    'conf_threshold': 0.35,
     'avg_hen_count': 0,
     'reference_video': None
 }
@@ -107,16 +111,16 @@ def _sync_generate_frames(video_source, ref_settings):
     
     if ref_settings:
         roi_x1 = 0
-        roi_y1 = int(frame_h * ref_settings.get('roi_y1_pct', 0.15))
+        roi_y1 = int(frame_h * ref_settings.get('roi_y1_pct', 0.10))
         roi_x2 = frame_w
-        roi_y2 = int(frame_h * ref_settings.get('roi_y2_pct', 0.85))
-        learned_conf = ref_settings.get('conf_threshold', 0.40)
+        roi_y2 = int(frame_h * ref_settings.get('roi_y2_pct', 0.88))
+        learned_conf = ref_settings.get('conf_threshold', 0.35)
         avg_ref_hens = ref_settings.get('avg_hen_count', 0)
     else:
         roi_x1 = 0
-        roi_y1 = int(frame_h * 0.15)
+        roi_y1 = int(frame_h * 0.10)
         roi_x2 = frame_w
-        roi_y2 = int(frame_h * 0.85)
+        roi_y2 = int(frame_h * 0.88)
         learned_conf = 0.25
         avg_ref_hens = 0
         
@@ -140,12 +144,15 @@ def _sync_generate_frames(video_source, ref_settings):
     prev_small_gray = None
     frame_no = 0
 
-    # Thread-safe AI background worker
+    # Thread-safe AI background worker with loop epoch flushing
+    loop_epoch = 0
     ai_lock = threading.Lock()
     ai_pending = None
     ai_pending_fno = 0
+    ai_pending_epoch = 0
     ai_result = None
     ai_result_fno = 0
+    ai_result_epoch = 0
     ai_running = True
     cam_positions = {0: (0.0, 0.0)}
 
@@ -174,14 +181,16 @@ def _sync_generate_frames(video_source, ref_settings):
         return True
 
     def ai_worker():
-        nonlocal ai_running, ai_result, ai_result_fno, ai_pending, ai_pending_fno
+        nonlocal ai_running, ai_result, ai_result_fno, ai_result_epoch, ai_pending, ai_pending_fno, ai_pending_epoch
         while ai_running:
             f_proc = None
             f_proc_no = 0
+            f_proc_epoch = 0
             with ai_lock:
                 if ai_pending is not None:
                     f_proc = ai_pending
                     f_proc_no = ai_pending_fno
+                    f_proc_epoch = ai_pending_epoch
                     ai_pending = None
             if f_proc is None:
                 time.sleep(0.005)
@@ -204,8 +213,10 @@ def _sync_generate_frames(video_source, ref_settings):
                             "conf": float(c)
                         })
                 with ai_lock:
-                    ai_result = raw
-                    ai_result_fno = f_proc_no
+                    if f_proc_epoch == loop_epoch:
+                        ai_result = raw
+                        ai_result_fno = f_proc_no
+                        ai_result_epoch = f_proc_epoch
             except Exception:
                 pass
 
@@ -229,8 +240,16 @@ def _sync_generate_frames(video_source, ref_settings):
             ret, frame = cap.read()
             if not ret:
                 if not is_live and total_video_frames > 0:
-                    # Clean video loop: reset state so Hen IDs never collide or duplicate across loops
+                    # Clean video loop: increment loop_epoch so any in-flight frame from end of video is dropped
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    with ai_lock:
+                        loop_epoch += 1
+                        ai_pending = None
+                        ai_pending_fno = 0
+                        ai_pending_epoch = loop_epoch
+                        ai_result = None
+                        ai_result_fno = 0
+                        ai_result_epoch = loop_epoch
                     hens.clear()
                     next_num = 1
                     frame_no = 0
@@ -269,9 +288,11 @@ def _sync_generate_frames(video_source, ref_settings):
                             if c < 0.15: continue
                             if not is_pure_comb(b, frame): continue
                             x1, y1, x2, y2 = map(int, b)
+                            cy = (y1 + y2) / 2.0
+                            if not (roi_y1 <= cy <= roi_y2): continue
                             raw0.append({
                                 "box": (x1, y1, x2, y2),
-                                "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+                                "center": ((x1 + x2) / 2.0, cy),
                                 "size": (x2 - x1, y2 - y1),
                                 "conf": float(c)
                             })
@@ -293,12 +314,12 @@ def _sync_generate_frames(video_source, ref_settings):
                 # ─── Frame 2+: Ultra-fast LK Optical Flow (1.8 ms) ───
                 # Tracks every active hen's head motion on every single frame smoothly at 30 FPS
                 if prev_small_gray is not None and len(hens) > 0:
-                    active_ids = [n for n, d in hens.items() if d["lost"] <= 5 and d["center"][1] <= (roi_y2 + 25)]
+                    active_ids = [n for n, d in hens.items() if d["lost"] <= 20 and d["center"][1] <= (roi_y2 + 40)]
                     if len(active_ids) > 0:
                         pts_small = np.array([[[hens[n]["center"][0] / scale_x, hens[n]["center"][1] / scale_y]] for n in active_ids], dtype=np.float32)
                         new_pts, status, _ = cv2.calcOpticalFlowPyrLK(
                             prev_small_gray, small_gray, pts_small, None,
-                            winSize=(19, 19), maxLevel=2,
+                            winSize=(21, 21), maxLevel=2,
                             criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
                         )
                         for idx, num in enumerate(active_ids):
@@ -308,21 +329,13 @@ def _sync_generate_frames(video_source, ref_settings):
                                 ox, oy = hens[num]["center"]
                                 dx = nx - ox
                                 dy = ny - oy
-                                if abs(dx) < 30 and abs(dy) < 30:
+                                if abs(dx) < 65 and abs(dy) < 65:
                                     hens[num]["center"] = (nx, ny)
                                     sb = hens[num]["smooth_box"]
                                     hens[num]["smooth_box"] = [sb[0] + dx, sb[1] + dy, sb[2] + dx, sb[3] + dy]
-                                    # Active comb check: if head turned away or vanished, mark lost
-                                    if frame_no % 3 == 0:
-                                        crop = frame[max(0, int(sb[1])):min(frame.shape[0], int(sb[3])),
-                                                     max(0, int(sb[0])):min(frame.shape[1], int(sb[2]))]
-                                        if crop.size > 0:
-                                            hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-                                            m1 = cv2.inRange(hsv, np.array([0, 35, 35]), np.array([16, 255, 255]))
-                                            m2 = cv2.inRange(hsv, np.array([150, 35, 35]), np.array([180, 255, 255]))
-                                            rr = (cv2.countNonZero(m1) + cv2.countNonZero(m2)) / float(crop.shape[0]*crop.shape[1])
-                                            if rr < 0.08:
-                                                hens[num]["lost"] += 2
+                                    hens[num]["lost"] = max(0, hens[num]["lost"] - 1)
+                                else:
+                                    hens[num]["lost"] += 1
                             else:
                                 hens[num]["lost"] += 1
                 prev_small_gray = small_gray
@@ -331,7 +344,7 @@ def _sync_generate_frames(video_source, ref_settings):
                 fresh_ai = None
                 fresh_fno = 0
                 with ai_lock:
-                    if ai_result is not None:
+                    if ai_result is not None and ai_result_epoch == loop_epoch:
                         fresh_ai = ai_result
                         fresh_fno = ai_result_fno
                         ai_result = None
@@ -347,22 +360,23 @@ def _sync_generate_frames(video_source, ref_settings):
                         det["box"] = (bx[0] + delta_cam_x, bx[1] + delta_cam_y, bx[2] + delta_cam_x, bx[3] + delta_cam_y)
                         det["center"] = (det["center"][0] + delta_cam_x, det["center"][1] + delta_cam_y)
 
+                    MATCH_RADIUS = 125.0
                     det_to_hen = {}
                     for d_idx, det in enumerate(dets):
                         best_n, best_d = None, float("inf")
                         for num, data in hens.items():
-                            if data["lost"] > 25: continue
+                            if data["lost"] > 35: continue
                             d = math.hypot(det["center"][0] - data["center"][0], det["center"][1] - data["center"][1])
-                            if d <= 90.0 and d < best_d: best_d = d; best_n = num
+                            if d <= MATCH_RADIUS and d < best_d: best_d = d; best_n = num
                         if best_n is not None: det_to_hen[d_idx] = (best_n, best_d)
 
                     hen_to_det = {}
                     for num, data in hens.items():
-                        if data["lost"] > 25: continue
+                        if data["lost"] > 35: continue
                         best_idx, best_d = None, float("inf")
                         for d_idx, det in enumerate(dets):
                             d = math.hypot(det["center"][0] - data["center"][0], det["center"][1] - data["center"][1])
-                            if d <= 90.0 and d < best_d: best_d = d; best_idx = d_idx
+                            if d <= MATCH_RADIUS and d < best_d: best_d = d; best_idx = d_idx
                         if best_idx is not None: hen_to_det[num] = (best_idx, best_d)
 
                     matched = set()
@@ -376,20 +390,20 @@ def _sync_generate_frames(video_source, ref_settings):
                             data["hits"] = data.get("hits", 1) + 1
                             raw = det["box"]
                             sb = data["smooth_box"]
-                            data["smooth_box"] = [0.50 * raw[i] + 0.50 * sb[i] for i in range(4)]
+                            data["smooth_box"] = [0.65 * raw[i] + 0.35 * sb[i] for i in range(4)]
                             data["center"] = ((data["smooth_box"][0] + data["smooth_box"][2]) / 2.0, (data["smooth_box"][1] + data["smooth_box"][3]) / 2.0)
 
                     for d_idx, det in enumerate(dets):
                         if d_idx in matched: continue
                         # Only register new hens if inside the detection zone
-                        if not (roi_y1 - 10 <= det["center"][1] <= roi_y2 + 10):
+                        if not (roi_y1 <= det["center"][1] <= roi_y2):
                             continue
                         reassigned = None
                         closest_d = float("inf")
                         for num, data in hens.items():
-                            if num in used or data["lost"] > 25: continue
+                            if num in used or data["lost"] > 35: continue
                             d = math.hypot(det["center"][0] - data["center"][0], det["center"][1] - data["center"][1])
-                            if d <= 90.0 and d < closest_d: closest_d = d; reassigned = num
+                            if d <= MATCH_RADIUS and d < closest_d: closest_d = d; reassigned = num
                         if reassigned is not None:
                             num = reassigned
                             data = hens[num]
@@ -411,6 +425,7 @@ def _sync_generate_frames(video_source, ref_settings):
                     if ai_pending is None and fresh_ai is None:
                         ai_pending = frame.copy()
                         ai_pending_fno = frame_no
+                        ai_pending_epoch = loop_epoch
 
             # Expire any hens that have exited below the detection zone or bottom of screen
             for num, data in hens.items():
@@ -490,12 +505,15 @@ def _sync_generate_frames(video_source, ref_settings):
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                    
-            # Pacing to exact video speed (30 FPS normal speed!)
+            # Pacing to exact video speed (smooth drift-compensated 30 FPS!)
             if not is_live:
                 target_time = t_stream_start + (frame_no - 1) * frame_delay
-                sleep_time = target_time - time.time()
+                now = time.time()
+                sleep_time = target_time - now
                 if sleep_time > 0:
                     time.sleep(sleep_time)
+                elif sleep_time < -0.05:
+                    t_stream_start = now - (frame_no - 1) * frame_delay
                     
     finally:
         ai_running = False

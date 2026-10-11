@@ -550,7 +550,7 @@ class LiveHenTracker:
                 detections.sort(key=lambda d: d["center"][1] * 2.0 + d["center"][0])
 
             # ─── 3. Mutual Nearest Neighbor (MNN) Matching ───
-            MAX_MATCH_DIST = 90.0  # Safe matching radius ensuring zero ID steals between neighboring birds
+            MAX_MATCH_DIST = 125.0  # Robust matching radius preventing ID drift when hens turn or peck
             det_to_hen = {}
             for d_idx, det in enumerate(detections):
                 cx, cy = det["center"]
@@ -638,7 +638,7 @@ class LiveHenTracker:
                     if num in used_hens or data["lost_frames"] > 45:
                         continue
                     d = math.hypot(center[0] - data["center"][0], center[1] - data["center"][1])
-                    if d <= 100.0 and d < closest_dist:
+                    if d <= 125.0 and d < closest_dist:
                         closest_dist = d
                         reassigned_num = num
 
