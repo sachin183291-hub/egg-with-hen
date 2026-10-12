@@ -8,7 +8,7 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import cv2
 import torch
-torch.set_num_threads(2)
+torch.set_num_threads(1)
 try:
     torch.set_num_interop_threads(1)
 except Exception:
@@ -122,7 +122,7 @@ def _sync_generate_frames(video_source, ref_settings):
         cap.release()
         return
         
-    OUT_W, OUT_H = 960, 540
+    OUT_W, OUT_H = 854, 480
     
     if not is_live:
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -136,7 +136,7 @@ def _sync_generate_frames(video_source, ref_settings):
     global current_total_count
     current_total_count = 0
     
-    # Asynchronous YOLO worker for periodic high-accuracy detection at imgsz=640
+    # Asynchronous YOLO worker for periodic high-accuracy detection at imgsz=512
     ai_lock = threading.Lock()
     ai_frame = None
     ai_results = None
@@ -151,10 +151,10 @@ def _sync_generate_frames(video_source, ref_settings):
                     f = ai_frame
                     ai_frame = None
             if f is None:
-                time.sleep(0.01)
+                time.sleep(0.02)
                 continue
             try:
-                res = model.predict(f, imgsz=640, conf=0.18, verbose=False)[0]
+                res = model.predict(f, imgsz=512, conf=0.18, verbose=False)[0]
                 dets = []
                 if res.boxes is not None:
                     bx = res.boxes.xyxy.cpu().numpy()
@@ -164,9 +164,9 @@ def _sync_generate_frames(video_source, ref_settings):
                         bw = x2 - x1
                         bh = y2 - y1
                         # Filter out ceiling beams / non-comb noise
-                        if y1 < OUT_H * 0.04 and bw > 150:
+                        if y1 < OUT_H * 0.04 and bw > 140:
                             continue
-                        if bw < 8 or bh < 8 or bw > 150 or bh > 150:
+                        if bw < 8 or bh < 8 or bw > 140 or bh > 140:
                             continue
                         cx = (x1 + x2) / 2.0
                         cy = (y1 + y2) / 2.0
@@ -192,15 +192,15 @@ def _sync_generate_frames(video_source, ref_settings):
     disp0 = cv2.resize(sample_frame, (OUT_W, OUT_H))
     prev_gray = cv2.cvtColor(disp0, cv2.COLOR_BGR2GRAY)
     try:
-        init_res = model.predict(disp0, imgsz=640, conf=0.18, verbose=False)[0]
+        init_res = model.predict(disp0, imgsz=512, conf=0.18, verbose=False)[0]
         if init_res.boxes is not None:
             ibx = init_res.boxes.xyxy.cpu().numpy()
             icf = init_res.boxes.conf.cpu().numpy()
             for b, c in zip(ibx, icf):
                 x1, y1, x2, y2 = map(float, b)
                 bw, bh = x2 - x1, y2 - y1
-                if y1 < OUT_H * 0.04 and bw > 150: continue
-                if bw < 8 or bh < 8 or bw > 150 or bh > 150: continue
+                if y1 < OUT_H * 0.04 and bw > 140: continue
+                if bw < 8 or bh < 8 or bw > 140 or bh > 140: continue
                 cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
                 hens[next_id] = {
                     "box": [x1, y1, x2, y2],
@@ -214,26 +214,19 @@ def _sync_generate_frames(video_source, ref_settings):
         
     frame_no = 0
     last_ai_frame_no = 0
-    start_wall = time.time()
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 65]
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
     
     try:
         while cap.isOpened():
-            # Real-time frame catchup to maintain exact 30 FPS normal playback speed
-            if not is_live:
-                target_frame = int((time.time() - start_wall) * fps)
-                while frame_no < target_frame - 1:
-                    grabbed = cap.grab()
-                    if not grabbed: break
-                    frame_no += 1
-
+            t_frame_start = time.time()
+            
+            # Read every frame sequentially - NO DROPPED FRAMES for 100% silky smooth playback
             ret, frame = cap.read()
             if not ret:
                 if not is_live:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     frame_no = 0
                     last_ai_frame_no = 0
-                    start_wall = time.time()
                     hens.clear()
                     next_id = 1
                     continue
@@ -251,6 +244,7 @@ def _sync_generate_frames(video_source, ref_settings):
                 for hid in active_ids:
                     x1, y1, x2, y2 = hens[hid]["box"]
                     cx, cy = hens[hid]["center"]
+                    # 5 points per hen: center + 4 quadrant points inside the comb box
                     quad_pts = [
                         (cx, cy),
                         (x1 * 0.7 + x2 * 0.3, y1 * 0.7 + y2 * 0.3),
@@ -266,7 +260,7 @@ def _sync_generate_frames(video_source, ref_settings):
                 pts_out, status, err = cv2.calcOpticalFlowPyrLK(
                     prev_gray, gray, pts_in, None,
                     winSize=(17, 17), maxLevel=2,
-                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 12, 0.03)
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
                 )
                 
                 hen_shifts = {hid: [] for hid in active_ids}
@@ -274,7 +268,7 @@ def _sync_generate_frames(video_source, ref_settings):
                     if status[i][0] == 1:
                         dx = pts_out[i][0][0] - pts_in[i][0][0]
                         dy = pts_out[i][0][1] - pts_in[i][0][1]
-                        if abs(dx) < 45 and abs(dy) < 45:
+                        if abs(dx) < 35 and abs(dy) < 35:
                             hen_shifts[hid].append((dx, dy))
                             
                 for hid, shifts in hen_shifts.items():
@@ -307,7 +301,7 @@ def _sync_generate_frames(video_source, ref_settings):
                         if hid in used_hens: continue
                         hx, hy = hdata["center"]
                         d = math.hypot(cx - hx, cy - hy)
-                        if d < 65 and d < best_dist:
+                        if d < 60 and d < best_dist:
                             best_dist = d
                             best_id = hid
                             
@@ -340,8 +334,8 @@ def _sync_generate_frames(video_source, ref_settings):
                 if hens[hid]["lost"] > 18:
                     del hens[hid]
 
-            # 3. Submit next frame to AI worker periodically (every ~24 frames / 0.8s) so CPU remains free for smooth 30 FPS playback
-            if frame_no - last_ai_frame_no >= 24:
+            # 3. Submit next frame to AI worker periodically (every ~25 frames / 0.8s) so CPU remains free for smooth 30 FPS playback
+            if frame_no - last_ai_frame_no >= 25:
                 with ai_lock:
                     if ai_frame is None and ai_results is None:
                         ai_frame = display.copy()
@@ -360,18 +354,18 @@ def _sync_generate_frames(video_source, ref_settings):
                 # Glowing green box
                 cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 label = f"HEN {hid}"
-                (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)
-                cv2.rectangle(display, (x1, max(y1 - 18, 0)), (x1 + w_txt + 4, max(y1, 18)), (0, 255, 0), -1)
-                cv2.putText(display, label, (x1 + 2, max(y1 - 4, 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (0, 0, 0), 1, cv2.LINE_AA)
+                (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+                cv2.rectangle(display, (x1, max(y1 - 16, 0)), (x1 + w_txt + 4, max(y1, 16)), (0, 255, 0), -1)
+                cv2.putText(display, label, (x1 + 2, max(y1 - 4, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
                 cv2.circle(display, (int((x1 + x2) / 2), int((y1 + y2) / 2)), 3, (0, 255, 0), -1)
                 
             time_s = frame_no / fps
             
             # Telemetry HUD
-            cv2.rectangle(display, (10, 10), (320, 100), (0, 0, 0), -1)
-            cv2.putText(display, f"TIME: {time_s:.1f}s", (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(display, f"HENS VISIBLE: {len(visible_hens)}", (20, 62), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2, cv2.LINE_AA)
-            cv2.putText(display, f"TOTAL COUNTED: {total_counted}", (20, 89), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2, cv2.LINE_AA)
+            cv2.rectangle(display, (10, 10), (300, 95), (0, 0, 0), -1)
+            cv2.putText(display, f"TIME: {time_s:.1f}s", (20, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(display, f"HENS VISIBLE: {len(visible_hens)}", (20, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(display, f"TOTAL COUNTED: {total_counted}", (20, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2, cv2.LINE_AA)
                 
             # JPEG encode & stream frame
             ret2, buffer = cv2.imencode('.jpg', display, encode_param)
@@ -379,14 +373,13 @@ def _sync_generate_frames(video_source, ref_settings):
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
                    
-            # Real-time pacing to maintain exact 30 FPS playback
-            if not is_live:
-                target_time = start_wall + frame_no * frame_delay
-                sleep_time = target_time - time.time()
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+            # Frame pacing: maintain exact 30 FPS timing with smooth sleep
+            work_time = time.time() - t_frame_start
+            sleep_time = frame_delay - work_time
+            if sleep_time > 0:
+                time.sleep(sleep_time)
             else:
-                time.sleep(0.005)
+                time.sleep(0.001)
     finally:
         ai_running = False
         cap.release()
