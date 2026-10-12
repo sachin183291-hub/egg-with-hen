@@ -101,21 +101,38 @@ export default function HenCombTrackingPage() {
         <div className="card" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: 30, color: '#f8fafc' }}>Select Stream Source</h3>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, width: '100%', maxWidth: 700 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 20, width: '100%', maxWidth: 850 }}>
+            <div 
+              className="ref-mode-btn"
+              onClick={() => {
+                setStreamUrl(`${backendUrl}/stream_video/DJI_20260911145052_0001_S.MP4?t=${Date.now()}`)
+                setStreamMode('camera')
+              }}
+              style={{ padding: '30px 18px', borderRadius: 16, border: '2px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
+            >
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#a855f7,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(168,85,247,0.4)' }}>
+                <FileVideo size={28} color="white" />
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>Farm Hen Video</div>
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: 4 }}>Instant 30 FPS tracking on demo video</div>
+              </div>
+            </div>
+
             <div 
               className="ref-mode-btn"
               onClick={() => { if(!isProcessing) fileInputRef.current?.click() }}
-              style={{ padding: '36px 20px', borderRadius: 16, border: '2px dashed rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.05)', cursor: isProcessing ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, transition: 'all 0.3s' }}
+              style={{ padding: '30px 18px', borderRadius: 16, border: '2px dashed rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.05)', cursor: isProcessing ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
             >
-              <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg,#10b981,#059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(16,185,129,0.4)' }}>
-                {isProcessing ? <RefreshCw className="animate-spin" size={30} color="white" /> : <Upload size={30} color="white" />}
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#10b981,#059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(169,185,129,0.4)' }}>
+                {isProcessing ? <RefreshCw className="animate-spin" size={28} color="white" /> : <Upload size={28} color="white" />}
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc' }}>
-                  {isProcessing ? 'Upload Complete! AI is Processing...' : 'Upload Video'}
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>
+                  {isProcessing ? 'Processing Video...' : 'Upload Video'}
                 </div>
-                <div style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: 6 }}>
-                  {isProcessing ? 'Please wait 1-2 minutes while AI tracks hens frame-by-frame' : 'Processes and plays at perfect normal speed'}
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: 4 }}>
+                  {isProcessing ? 'Streaming at normal speed' : 'Upload custom farm video file'}
                 </div>
               </div>
             </div>
@@ -124,14 +141,14 @@ export default function HenCombTrackingPage() {
             <div 
               className="ref-mode-btn"
               onClick={startLiveCamera}
-              style={{ padding: '36px 20px', borderRadius: 16, border: '2px solid rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, transition: 'all 0.3s' }}
+              style={{ padding: '30px 18px', borderRadius: 16, border: '2px solid rgba(59,130,246,0.4)', background: 'rgba(59,130,246,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
             >
-              <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg,#3b82f6,#1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(59,130,246,0.4)' }}>
-                <Camera size={30} color="white" />
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#3b82f6,#1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(59,130,246,0.4)' }}>
+                <Camera size={28} color="white" />
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc' }}>Live Camera</div>
-                <div style={{ fontSize: '0.9rem', color: '#94a3b8', marginTop: 6 }}>Real-time streaming via webcam</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>Live Camera</div>
+                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: 4 }}>Real-time streaming via webcam</div>
               </div>
             </div>
           </div>
