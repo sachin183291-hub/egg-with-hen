@@ -144,7 +144,6 @@ def _sync_generate_frames(video_source, ref_settings):
         
     import math
     import time
-    import threading
     hens = {}
     next_num = 1
     total_counted = 0
@@ -152,422 +151,206 @@ def _sync_generate_frames(video_source, ref_settings):
     global current_total_count
     current_total_count = 0
     
-    total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if not is_live else 0
-    frame_delay = 1.0 / fps if fps > 0 else 1.0 / 30.0
-    t_stream_start = time.time()
-    
-    prev_small_gray = None
     frame_no = 0
-
-    # Thread-safe AI background worker with loop epoch flushing
-    loop_epoch = 0
-    ai_lock = threading.Lock()
-    ai_pending = None
-    ai_pending_fno = 0
-    ai_pending_epoch = 0
-    ai_result = None
-    ai_result_fno = 0
-    ai_result_epoch = 0
-    ai_running = True
-    cam_positions = {0: (0.0, 0.0)}
-
-    def is_pure_comb(box, img):
-        x1, y1, x2, y2 = map(int, box)
-        w = x2 - x1
-        h = y2 - y1
-        if w <= 8 or h <= 8:
-            return False
-        # Model is specifically trained on HEN_COMB - allow all genuine comb/head sizes
-        if w > 350 or h > 350:
-            return False
-        return True
-
-    def ai_worker():
-        nonlocal ai_running, ai_result, ai_result_fno, ai_result_epoch, ai_pending, ai_pending_fno, ai_pending_epoch
-        while ai_running:
-            f_proc = None
-            f_proc_no = 0
-            f_proc_epoch = 0
-            with ai_lock:
-                if ai_pending is not None:
-                    f_proc = ai_pending
-                    f_proc_no = ai_pending_fno
-                    f_proc_epoch = ai_pending_epoch
-                    ai_pending = None
-            if f_proc is None:
-                time.sleep(0.005)
-                continue
-
-            try:
-                res = model.predict(f_proc, verbose=False, conf=0.10, iou=0.40, imgsz=640)
-                raw = []
-                if res and len(res) > 0 and res[0].boxes is not None:
-                    bx = res[0].boxes.xyxy.cpu().numpy()
-                    cf = res[0].boxes.conf.cpu().numpy()
-                    for b, c in zip(bx, cf):
-                        if c < 0.10: continue
-                        if not is_pure_comb(b, f_proc): continue
-                        x1, y1, x2, y2 = map(int, b)
-                        raw.append({
-                            "box": (x1, y1, x2, y2),
-                            "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
-                            "size": (x2 - x1, y2 - y1),
-                            "conf": float(c)
-                        })
-                with ai_lock:
-                    if f_proc_epoch == loop_epoch:
-                        ai_result = raw
-                        ai_result_fno = f_proc_no
-                        ai_result_epoch = f_proc_epoch
-            except Exception:
-                pass
-
-    threading.Thread(target=ai_worker, daemon=True).start()
-
-    def deduplicate_detections(raw_list):
-        raw_list.sort(key=lambda d: d["conf"], reverse=True)
-        dets = []
-        for r_det in raw_list:
-            rcx, rcy = r_det["center"]
-            is_dup = False
-            for ex in dets:
-                if math.hypot(rcx - ex["center"][0], rcy - ex["center"][1]) < 45:
-                    is_dup = True; break
-            if not is_dup:
-                dets.append(r_det)
-        return dets
-
+    start_time = time.time()
+    last_frame_no = 0
+    
     try:
         while cap.isOpened():
+            if not is_live:
+                elapsed_time = time.time() - start_time
+                target_frame = int(elapsed_time * fps)
+                
+                if target_frame < frame_no:
+                    sleep_time = (frame_no - target_frame) / fps
+                    if sleep_time > 0:
+                        time.sleep(min(sleep_time, 0.04))
+                elif target_frame > frame_no:
+                    skip_frames = target_frame - frame_no
+                    if skip_frames < 8:
+                        for _ in range(skip_frames):
+                            cap.grab()
+                    else:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                    frame_no = target_frame
+                    
             ret, frame = cap.read()
             if not ret:
-                if not is_live and total_video_frames > 0:
-                    # Clean video loop: increment loop_epoch so any in-flight frame from end of video is dropped
+                if not is_live:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    with ai_lock:
-                        loop_epoch += 1
-                        ai_pending = None
-                        ai_pending_fno = 0
-                        ai_pending_epoch = loop_epoch
-                        ai_result = None
-                        ai_result_fno = 0
-                        ai_result_epoch = loop_epoch
+                    start_time = time.time()
+                    frame_no = 0
+                    last_frame_no = 0
                     hens.clear()
                     next_num = 1
-                    frame_no = 0
-                    prev_small_gray = None
-                    cam_positions = {0: (0.0, 0.0)}
-                    t_stream_start = time.time()
+                    total_counted = 0
                     continue
                 break
-            
+                
+            frame_delta = frame_no - last_frame_no
+            if frame_delta <= 0: frame_delta = 1
+            last_frame_no = frame_no
             frame_no += 1
-
-            # Downscaled grayscale for sub-2ms optical flow head tracking (640x360)
-            small_gray = cv2.cvtColor(cv2.resize(frame, (640, 360)), cv2.COLOR_BGR2GRAY)
-            scale_x = frame.shape[1] / 640.0
-            scale_y = frame.shape[0] / 360.0
-
-            # Estimate camera translation for latency compensation
-            cam_dx, cam_dy = 0.0, 0.0
-            if prev_small_gray is not None:
-                shift, resp = cv2.phaseCorrelate(prev_small_gray.astype(np.float32), small_gray.astype(np.float32))
-                if resp > 0.04 and abs(shift[0]) < 25 and abs(shift[1]) < 25:
-                    cam_dx = shift[0] * scale_x
-                    cam_dy = shift[1] * scale_y
-            last_cam = cam_positions.get(frame_no - 1, (0.0, 0.0))
-            cam_positions[frame_no] = (last_cam[0] + cam_dx, last_cam[1] + cam_dy)
-
-            if frame_no == 1:
-                # Frame 1 Synchronous Initialization: clean spatial sorting (Hen 1, 2, 3...)
-                try:
-                    res0 = model.predict(frame, verbose=False, conf=0.10, iou=0.35, imgsz=640)
-                    raw0 = []
-                    if res0 and len(res0) > 0 and res0[0].boxes is not None:
-                        bx = res0[0].boxes.xyxy.cpu().numpy()
-                        cf = res0[0].boxes.conf.cpu().numpy()
-                        for b, c in zip(bx, cf):
-                            if c < 0.10: continue
-                            if not is_pure_comb(b, frame): continue
-                            x1, y1, x2, y2 = map(int, b)
-                            cy = (y1 + y2) / 2.0
-                            raw0.append({
-                                "box": (x1, y1, x2, y2),
-                                "center": ((x1 + x2) / 2.0, cy),
-                                "size": (x2 - x1, y2 - y1),
-                                "conf": float(c)
-                            })
-                    dets0 = deduplicate_detections(raw0)
-                    dets0.sort(key=lambda d: d["center"][1] * 2.0 + d["center"][0])
-                    for det in dets0:
-                        num = next_num
-                        next_num += 1
-                        hens[num] = {
-                            "center": det["center"], "vel": (0.0, 0.0), "lost": 0, "hits": 2,
-                            "size": det["size"], "smooth_box": [float(v) for v in det["box"]],
-                            "counted": True
-                        }
-                except Exception:
-                    pass
-                prev_small_gray = small_gray
-                t_stream_start = time.time()
-            else:
-                # ─── Frame 2+: Ultra-fast LK Optical Flow (1.8 ms) ───
-                # Tracks every active hen's head motion on every single frame smoothly at 30 FPS
-                if prev_small_gray is not None and len(hens) > 0:
-                    active_ids = [n for n, d in hens.items() if d["lost"] <= 25]
-                    if len(active_ids) > 0:
-                        pts_small = np.array([[[hens[n]["center"][0] / scale_x, hens[n]["center"][1] / scale_y]] for n in active_ids], dtype=np.float32)
-                        new_pts, status, _ = cv2.calcOpticalFlowPyrLK(
-                            prev_small_gray, small_gray, pts_small, None,
-                            winSize=(31, 31), maxLevel=3,
-                            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
-                        )
-                        for idx, num in enumerate(active_ids):
-                            ovx, ovy = hens[num].get("vel", (0.0, 0.0))
-                            if status[idx][0] == 1:
-                                nx = float(new_pts[idx][0][0]) * scale_x
-                                ny = float(new_pts[idx][0][1]) * scale_y
-                                ox, oy = hens[num]["center"]
-                                dx = nx - ox
-                                dy = ny - oy
-                                if abs(dx) < 140 and abs(dy) < 140:
-                                    hens[num]["center"] = (nx, ny)
-                                    sb = hens[num]["smooth_box"]
-                                    hens[num]["smooth_box"] = [sb[0] + dx, sb[1] + dy, sb[2] + dx, sb[3] + dy]
-                                    hens[num]["vel"] = (0.7 * ovx + 0.3 * dx, 0.7 * ovy + 0.3 * dy)
-                                    hens[num]["lost"] = max(0, hens[num]["lost"] - 1)
-                                else:
-                                    # Large sudden jump: propagate velocity smoothly
-                                    cx, cy = hens[num]["center"]
-                                    hens[num]["center"] = (cx + ovx, cy + ovy)
-                                    sb = hens[num]["smooth_box"]
-                                    hens[num]["smooth_box"] = [sb[0] + ovx, sb[1] + ovy, sb[2] + ovx, sb[3] + ovy]
-                                    hens[num]["lost"] += 1
-                            else:
-                                # Feature momentarily occluded / fast motion: maintain tracking via velocity
-                                decay = 0.85 ** min(hens[num]["lost"], 8)
-                                dx = ovx * decay
-                                dy = ovy * decay
-                                cx, cy = hens[num]["center"]
-                                hens[num]["center"] = (cx + dx, cy + dy)
-                                sb = hens[num]["smooth_box"]
-                                hens[num]["smooth_box"] = [sb[0] + dx, sb[1] + dy, sb[2] + dx, sb[3] + dy]
-                                hens[num]["lost"] += 1
-                prev_small_gray = small_gray
-
-                # Check if background AI returned fresh detections
-                fresh_ai = None
-                fresh_fno = 0
-                with ai_lock:
-                    if ai_result is not None and ai_result_epoch == loop_epoch:
-                        fresh_ai = ai_result
-                        fresh_fno = ai_result_fno
-                        ai_result = None
-
-                if fresh_ai is not None:
-                    # Latency motion compensation: advance AI detections from fresh_fno to current frame_no
-                    delta_cam_x = cam_positions[frame_no][0] - cam_positions.get(fresh_fno, (0.0, 0.0))[0]
-                    delta_cam_y = cam_positions[frame_no][1] - cam_positions.get(fresh_fno, (0.0, 0.0))[1]
-
-                    dets = deduplicate_detections(fresh_ai)
-                    for det in dets:
-                        bx = det["box"]
-                        det["box"] = (bx[0] + delta_cam_x, bx[1] + delta_cam_y, bx[2] + delta_cam_x, bx[3] + delta_cam_y)
-                        det["center"] = (det["center"][0] + delta_cam_x, det["center"][1] + delta_cam_y)
-
-                    det_to_hen = {}
-                    for d_idx, det in enumerate(dets):
-                        best_n, best_d = None, float("inf")
-                        for num, data in hens.items():
-                            if data["lost"] > 40: continue
-                            # Match using predicted position based on velocity
-                            px = data["center"][0] + data.get("vel", (0.0, 0.0))[0] * min(data["lost"], 8)
-                            py = data["center"][1] + data.get("vel", (0.0, 0.0))[1] * min(data["lost"], 8)
-                            d = math.hypot(det["center"][0] - px, det["center"][1] - py)
-                            match_radius = min(260.0, 160.0 + data["lost"] * 6.0)
-                            if d <= match_radius and d < best_d:
-                                best_d = d
-                                best_n = num
-                        if best_n is not None: det_to_hen[d_idx] = (best_n, best_d)
-
-                    hen_to_det = {}
-                    for num, data in hens.items():
-                        if data["lost"] > 40: continue
-                        px = data["center"][0] + data.get("vel", (0.0, 0.0))[0] * min(data["lost"], 8)
-                        py = data["center"][1] + data.get("vel", (0.0, 0.0))[1] * min(data["lost"], 8)
-                        best_idx, best_d = None, float("inf")
-                        for d_idx, det in enumerate(dets):
-                            d = math.hypot(det["center"][0] - px, det["center"][1] - py)
-                            match_radius = min(260.0, 160.0 + data["lost"] * 6.0)
-                            if d <= match_radius and d < best_d:
-                                best_d = d
-                                best_idx = d_idx
-                        if best_idx is not None: hen_to_det[num] = (best_idx, best_d)
-
-                    matched = set()
-                    used = set()
-                    for d_idx, (num, dist) in det_to_hen.items():
-                        if num in hen_to_det and hen_to_det[num][0] == d_idx:
-                            matched.add(d_idx); used.add(num)
-                            det = dets[d_idx]
-                            data = hens[num]
-                            old_cx, old_cy = data["center"]
-                            new_cx, new_cy = det["center"]
-                            ovx, ovy = data.get("vel", (0.0, 0.0))
-                            data["vel"] = (0.6 * ovx + 0.4 * (new_cx - old_cx), 0.6 * ovy + 0.4 * (new_cy - old_cy))
-                            data["center"] = (new_cx, new_cy)
-                            data["lost"] = 0
-                            data["hits"] = data.get("hits", 1) + 1
-                            raw = det["box"]
-                            sb = data["smooth_box"]
-                            data["smooth_box"] = [0.80 * raw[i] + 0.20 * sb[i] for i in range(4)]
-
-                    for d_idx, det in enumerate(dets):
-                        if d_idx in matched: continue
-                        reassigned = None
-                        closest_d = float("inf")
-                        for num, data in hens.items():
-                            if num in used or data["lost"] > 40: continue
-                            px = data["center"][0] + data.get("vel", (0.0, 0.0))[0] * min(data["lost"], 8)
-                            py = data["center"][1] + data.get("vel", (0.0, 0.0))[1] * min(data["lost"], 8)
-                            d = math.hypot(det["center"][0] - px, det["center"][1] - py)
-                            match_radius = min(260.0, 160.0 + data["lost"] * 6.0)
-                            if d <= match_radius and d < closest_d:
-                                closest_d = d
-                                reassigned = num
-                        if reassigned is not None:
-                            num = reassigned
-                            data = hens[num]
-                            old_cx, old_cy = data["center"]
-                            new_cx, new_cy = det["center"]
-                            ovx, ovy = data.get("vel", (0.0, 0.0))
-                            data["vel"] = (0.6 * ovx + 0.4 * (new_cx - old_cx), 0.6 * ovy + 0.4 * (new_cy - old_cy))
-                            data["center"] = (new_cx, new_cy)
-                            data["lost"] = 0
-                            data["hits"] = data.get("hits", 1) + 1
-                            data["smooth_box"] = [float(v) for v in det["box"]]
-                        else:
-                            num = next_num; next_num += 1
-                            hens[num] = {
-                                "center": det["center"], "vel": (0.0, 0.0), "lost": 0, "hits": 2,
-                                "size": det["size"], "smooth_box": [float(v) for v in det["box"]],
-                                "counted": True
-                            }
-                        used.add(num)
-
-                # Continuous background AI dispatch: whenever AI is idle, immediately feed next frame
-                with ai_lock:
-                    if ai_pending is None and fresh_ai is None:
-                        ai_pending = frame.copy()
-                        ai_pending_fno = frame_no
-                        ai_pending_epoch = loop_epoch
-
-            # Expire only hens that have been lost for too long or left the screen completely
-            for num, data in hens.items():
-                cx, cy = data["center"]
-                if data["lost"] > 60:
-                    data["lost"] = 999
-                elif cy > (frame.shape[0] + 60) or cy < -60 or cx < -60 or cx > (frame.shape[1] + 60):
-                    data["lost"] = 999
-
-            total_counted = len([h for h in hens.values() if h.get("hits", 0) >= 2])
-            current_total_count = total_counted
-            visible_in_zone = len([
-                h for h in hens.values()
-                if h["lost"] <= 20
-            ])
-
-            # Fast 720p display rendering & JPEG encoding (6ms total!)
-            display = cv2.resize(frame, (1280, 720))
-            scale_disp_x = 1280.0 / frame.shape[1]
-            scale_disp_y = 720.0 / frame.shape[0]
-
-            r_x1 = int(roi_x1 * scale_disp_x); r_y1 = int(roi_y1 * scale_disp_y)
-            r_x2 = int(roi_x2 * scale_disp_x); r_y2 = int(roi_y2 * scale_disp_y)
-            cv2.rectangle(display, (r_x1, r_y1), (r_x2, r_y2), (0, 200, 255), 2)
-            cv2.putText(display, "REF-TUNED DETECTION ZONE" if ref_settings else "DETECTION ZONE", 
-                        (r_x1 + 10, r_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2, cv2.LINE_AA)
-
-            for num, data in hens.items():
-                if data["lost"] <= 25 and data.get("hits", 0) >= 2:
-                    cy = data["center"][1]
-                    cx = data["center"][0]
-                    # Do not draw if way off screen
-                    if cy < -20 or cy > (frame.shape[0] + 20) or cx < -20 or cx > (frame.shape[1] + 20):
-                        continue
-
-                    sb = data["smooth_box"]
-                    x1 = int(sb[0] * scale_disp_x); y1 = int(sb[1] * scale_disp_y)
-                    x2 = int(sb[2] * scale_disp_x); y2 = int(sb[3] * scale_disp_y)
+            
+            # Direct YOLO comb/head detection on frame
+            results = model.predict(frame, verbose=False, conf=0.08, iou=0.45, imgsz=512)
+            raw_dets = []
+            if results and results[0].boxes is not None:
+                boxes = results[0].boxes.xyxy.cpu().numpy()
+                confs = results[0].boxes.conf.cpu().numpy()
+                for box, conf in zip(boxes, confs):
+                    if conf < 0.10: continue
+                    x1, y1, x2, y2 = map(int, box)
+                    w, h = x2 - x1, y2 - y1
+                    if w <= 6 or h <= 6: continue
+                    if w > 180 or h > 180: continue # Exclude whole hen body boxes
+                    raw_dets.append({
+                        "box": (x1, y1, x2, y2),
+                        "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+                        "size": (w, h),
+                        "conf": float(conf)
+                    })
                     
-                    # Ensure coordinates are within display boundary
-                    x1 = max(0, min(1279, x1))
-                    y1 = max(0, min(719, y1))
-                    x2 = max(0, min(1279, x2))
-                    y2 = max(0, min(719, y2))
-                    if x2 <= x1 + 4 or y2 <= y1 + 4:
-                        continue
-
-                    # Fresh detection = solid bright green; smoothly coasting = slight fade
-                    color = (0, 255, 0)
-                    if data["lost"] > 6:
-                        fade = max(0.4, 1.0 - (data["lost"] / 25.0))
-                        color = (0, int(255 * fade), int(200 * (1 - fade)))
-
-                    cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-                    label = f"HEN {num}"
-                    (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-                    cv2.rectangle(display, (x1, max(y1 - 22, 0)), (x1 + w_txt + 4, max(y1, 22)), color, -1)
-                    cv2.putText(display, label, (x1 + 2, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
-                    cv2.circle(display, (int((x1 + x2) / 2), int((y1 + y2) / 2)), 4, color, -1)
-
+            raw_dets.sort(key=lambda d: d["conf"], reverse=True)
+            detections = []
+            for d in raw_dets:
+                is_duplicate = False
+                for fd in detections:
+                    if math.hypot(d["center"][0] - fd["center"][0], d["center"][1] - fd["center"][1]) < 45:
+                        is_duplicate = True
+                        break
+                if not is_duplicate:
+                    detections.append(d)
+                    
+            for num in hens:
+                hens[num]["lost"] += frame_delta
+                
+            used = set()
+            for det in detections:
+                center = det["center"]
+                raw = det["box"]
+                best_d, best_n = float("inf"), None
+                for num, data in hens.items():
+                    if num in used or data["lost"] > 45: continue
+                    cx, cy = data["center"]
+                    vx, vy = data["vel"]
+                    lost = data["lost"]
+                    px = cx + vx * min(lost, 10)
+                    py = cy + vy * min(lost, 10)
+                    d = math.hypot(center[0] - px, center[1] - py)
+                    if d <= min(200, 100 + lost * 5) and d < best_d:
+                        best_d, best_n = d, num
+                if best_n is not None:
+                    asgn = best_n
+                    data = hens[asgn]
+                    old_cx, old_cy = data["center"]
+                    total_lost = max(1, data["lost"])
+                    nvx = (center[0] - old_cx) / total_lost
+                    nvy = (center[1] - old_cy) / total_lost
+                    ovx, ovy = data["vel"]
+                    data["center"] = center
+                    data["vel"] = (0.7 * ovx + 0.3 * nvx, 0.7 * ovy + 0.3 * nvy)
+                    data["lost"] = 0
+                    data["hits"] = data.get("hits", 1) + 1
+                    data["size"] = det["size"]
+                    sb = data["smooth_box"]
+                    data["smooth_box"] = [0.65 * raw[i] + 0.35 * sb[i] for i in range(4)]
+                else:
+                    asgn = next_num
+                    next_num += 1
+                    hens[asgn] = {
+                        "center": center, "vel": (0.0, 0.0),
+                        "lost": 0, "size": det["size"], "hits": 1,
+                        "smooth_box": [float(v) for v in raw],
+                        "counted": False
+                    }
+                used.add(asgn)
+                det["num"] = asgn
+                
+                if roi_x1 <= center[0] <= roi_x2 and roi_y1 <= center[1] <= roi_y2:
+                    if not hens[asgn].get("counted", False):
+                        hens[asgn]["counted"] = True
+                        total_counted += 1
+                        current_total_count = total_counted
+                        
+            display = frame.copy()
+            visible_in_zone = 0
+            
+            # Draw detection zone
+            cv2.rectangle(display, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 200, 255), 2)
+            cv2.putText(display, "REF-TUNED DETECTION ZONE" if ref_settings else "DETECTION ZONE",
+                        (roi_x1 + 10, roi_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2, cv2.LINE_AA)
+                        
+            # 1. Draw direct detections
+            for det in detections:
+                num = det["num"]
+                sb = hens[num]["smooth_box"]
+                x1, y1, x2, y2 = int(sb[0]), int(sb[1]), int(sb[2]), int(sb[3])
+                
+                if roi_x1 <= (x1 + x2) / 2 <= roi_x2 and roi_y1 <= (y1 + y2) / 2 <= roi_y2:
+                    visible_in_zone += 1
+                    
+                cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                label = f"HEN {num}"
+                (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                cv2.rectangle(display, (x1, max(y1 - 22, 0)), (x1 + w_txt + 4, max(y1, 22)), (0, 255, 0), -1)
+                cv2.putText(display, label, (x1 + 2, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+                cv2.circle(display, (int((sb[0] + sb[2]) / 2), int((sb[1] + sb[3]) / 2)), 4, (0, 255, 0), -1)
+                
+            # 2. Draw moving / occluded hens smoothly using velocity
+            for num, data in hens.items():
+                if num not in used and 0 < data["lost"] <= 45:
+                    lost = data["lost"]
+                    vx, vy = data["vel"]
+                    sb = data.get("smooth_box")
+                    if sb:
+                        pcx = (sb[0] + sb[2]) / 2 + vx * min(lost, 15)
+                        pcy = (sb[1] + sb[3]) / 2 + vy * min(lost, 15)
+                        bw = sb[2] - sb[0]; bh = sb[3] - sb[1]
+                    else:
+                        cx, cy = data["center"]
+                        pcx = cx + vx * min(lost, 15)
+                        pcy = cy + vy * min(lost, 15)
+                        bw, bh = data.get("size", (60, 60))
+                        
+                    if roi_x1 <= pcx <= roi_x2 and roi_y1 <= pcy <= roi_y2:
+                        visible_in_zone += 1
+                        
+                    x1 = int(pcx - bw / 2); y1 = int(pcy - bh / 2)
+                    x2 = int(pcx + bw / 2); y2 = int(pcy + bh / 2)
+                    
+                    if lost <= 12:
+                        # Solid green box
+                        cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        label = f"HEN {num}"
+                        (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                        cv2.rectangle(display, (x1, max(y1 - 22, 0)), (x1 + w_txt + 4, max(y1, 22)), (0, 255, 0), -1)
+                        cv2.putText(display, label, (x1 + 2, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
+                        cv2.circle(display, (int((x1 + x2) / 2), int((y1 + y2) / 2)), 4, (0, 255, 0), -1)
+                    else:
+                        # Fade out smoothly
+                        fade = int(255 * max(0.2, 1.0 - lost / 45.0))
+                        cv2.rectangle(display, (x1, y1), (x2, y2), (0, fade, 255), 1)
+                        label = f"HEN {num}"
+                        cv2.putText(display, label, (x1, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, fade, 255), 1)
+                        
             time_s = frame_no / fps
-
-            # HUD Telemetry
-            hud_w, hud_h = 360, 140
-            overlay = display.copy()
-            cv2.rectangle(overlay, (15, 15), (15 + hud_w, 15 + hud_h), (15, 23, 42), -1)
-            cv2.addWeighted(overlay, 0.75, display, 0.25, 0, display)
             
-            cv2.rectangle(display, (15, 15), (15 + hud_w, 15 + hud_h), (16, 185, 129), 2)
-            cv2.putText(display, "LIVE POULTRY VISION AI", (28, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (16, 185, 129), 2, cv2.LINE_AA)
-            cv2.line(display, (28, 46), (15 + hud_w - 15, 46), (71, 85, 105), 1)
-            
-            cv2.putText(display, "VISIBLE IN ZONE:", (28, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (148, 163, 184), 1, cv2.LINE_AA)
-            cv2.putText(display, f"{visible_in_zone}", (195, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.54, (0, 255, 128), 2, cv2.LINE_AA)
-            
-            cv2.putText(display, "TOTAL UNIQUE HENS:", (28, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (148, 163, 184), 1, cv2.LINE_AA)
-            cv2.putText(display, f"{total_counted}", (195, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.54, (0, 220, 255), 2, cv2.LINE_AA)
-            
-            cv2.putText(display, "SESSION TIME:", (28, 116), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (148, 163, 184), 1, cv2.LINE_AA)
-            cv2.putText(display, f"{time_s:.1f}s", (195, 116), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (241, 245, 249), 2, cv2.LINE_AA)
-            
-            cv2.putText(display, "TRACKING ENGINE:", (28, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (148, 163, 184), 1, cv2.LINE_AA)
-            cv2.putText(display, "HYBRID 30FPS [ACTIVE]", (195, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (16, 185, 129), 2, cv2.LINE_AA)
-            
-            disp_w = display.shape[1]
-            cv2.rectangle(display, (disp_w - 150, 15), (disp_w - 20, 45), (16, 185, 129), -1)
-            cv2.putText(display, "[* LIVE AI]", (disp_w - 140, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA)
-            
+            # Telemetry HUD
+            cv2.rectangle(display, (10, 10), (380, 130), (0, 0, 0), -1)
+            cv2.putText(display, f"TIME: {time_s:.1f}s", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(display, f"HENS IN ZONE: {visible_in_zone}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(display, f"TOTAL COUNT: {total_counted}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2, cv2.LINE_AA)
+            if ref_settings:
+                ref_label = f"REF CONF:{learned_conf:.2f} | REF AVG:{avg_ref_hens} hens"
+                cv2.putText(display, ref_label, (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (200, 200, 0), 1, cv2.LINE_AA)
+                
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
             ret2, buffer = cv2.imencode('.jpg', display, encode_param)
             frame_bytes = buffer.tobytes()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-                   
-            # Pacing to exact video speed (smooth drift-compensated 30 FPS!)
-            if not is_live:
-                target_time = t_stream_start + (frame_no - 1) * frame_delay
-                now = time.time()
-                sleep_time = target_time - now
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                elif sleep_time < -0.05:
-                    t_stream_start = now - (frame_no - 1) * frame_delay
-                    
     finally:
-        ai_running = False
         cap.release()
 
 
