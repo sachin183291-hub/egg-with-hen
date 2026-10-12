@@ -53,24 +53,11 @@ class OpticalHenTracker:
         x1, y1, x2, y2 = map(int, box)
         w = x2 - x1
         h = y2 - y1
-        area = w * h
-        # Strict comb / head dimensions (25-165px) - excludes large hen body (200-500px)
-        if w < 25 or h < 25 or w > 165 or h > 165:
+        if w <= 8 or h <= 8:
             return False
-        if area < 900 or area > 22000:
+        # Model is specifically trained on HEN_COMB - allow all genuine comb/head sizes
+        if w > 350 or h > 350:
             return False
-        aspect = w / float(max(h, 1))
-        if aspect < 0.35 or aspect > 2.2:
-            return False
-        # Red comb color verification in HSV
-        crop = frame[max(0, y1):min(frame.shape[0], y2), max(0, x1):min(frame.shape[1], x2)]
-        if crop.size > 0:
-            hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-            mask1 = cv2.inRange(hsv, np.array([0, 35, 35]), np.array([16, 255, 255]))
-            mask2 = cv2.inRange(hsv, np.array([150, 35, 35]), np.array([180, 255, 255]))
-            red_ratio = (cv2.countNonZero(mask1) + cv2.countNonZero(mask2)) / float(crop.shape[0] * crop.shape[1])
-            if red_ratio < 0.10:
-                return False
         return True
 
     def process_live_frame(self, frame, frame_number, video_time):
@@ -120,8 +107,8 @@ class OpticalHenTracker:
             results = self.model.predict(
                 source=frame,
                 verbose=False, 
-                conf=0.15,
-                iou=0.35,
+                conf=0.10,
+                iou=0.40,
                 imgsz=640,
                 device=self.DEVICE
             )
@@ -132,7 +119,7 @@ class OpticalHenTracker:
                 confs = results[0].boxes.conf.cpu().numpy()
 
                 for box, conf in zip(boxes, confs):
-                    if conf < 0.15: continue
+                    if conf < 0.10: continue
                     if not self.is_pure_comb(box, frame): continue
                     x1, y1, x2, y2 = map(int, box)
                     raw_detections.append({
@@ -177,7 +164,7 @@ class OpticalHenTracker:
 
             with self.state_lock:
                 # ─── 3. Mutual Nearest Neighbor (MNN) Matching ───
-                MAX_MATCH_DIST = 125.0
+                MAX_MATCH_DIST = 200.0
                 det_to_hen = {}
                 for d_idx, det in enumerate(detections):
                     cx, cy = det["center"]
@@ -256,7 +243,7 @@ class OpticalHenTracker:
                     for num, data in self.hens.items():
                         if num in used_hens or data["lost_frames"] > 45: continue
                         d = math.hypot(center[0] - data["center"][0], center[1] - data["center"][1])
-                        if d <= 125.0 and d < closest_dist:
+                        if d <= 200.0 and d < closest_dist:
                             closest_dist = d
                             reassigned_num = num
 
@@ -295,7 +282,7 @@ class OpticalHenTracker:
 
                 # 4. Predicted ghost boxes for briefly occluded hens (prevents visual flickering)
                 for num, data in self.hens.items():
-                    if num not in used_hens and 0 < data["lost_frames"] <= 15 and data.get("hits", 0) >= 2:
+                    if num not in used_hens and 0 < data["lost_frames"] <= 25 and data.get("hits", 0) >= 2:
                         lost = data["lost_frames"]
                         sb = data.get("smooth_box")
                         if sb:

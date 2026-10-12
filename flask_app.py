@@ -175,24 +175,11 @@ def _sync_generate_frames(video_source, ref_settings):
         x1, y1, x2, y2 = map(int, box)
         w = x2 - x1
         h = y2 - y1
-        area = w * h
-        # Strict comb / head dimensions (25-165px) - excludes large hen body (200-500px)
-        if w < 25 or h < 25 or w > 165 or h > 165:
+        if w <= 8 or h <= 8:
             return False
-        if area < 900 or area > 22000:
+        # Model is specifically trained on HEN_COMB - allow all genuine comb/head sizes
+        if w > 350 or h > 350:
             return False
-        aspect = w / float(max(h, 1))
-        if aspect < 0.35 or aspect > 2.2:
-            return False
-        # Red comb color verification in HSV
-        crop = img[max(0, y1):min(img.shape[0], y2), max(0, x1):min(img.shape[1], x2)]
-        if crop.size > 0:
-            hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-            mask1 = cv2.inRange(hsv, np.array([0, 35, 35]), np.array([16, 255, 255]))
-            mask2 = cv2.inRange(hsv, np.array([150, 35, 35]), np.array([180, 255, 255]))
-            red_ratio = (cv2.countNonZero(mask1) + cv2.countNonZero(mask2)) / float(crop.shape[0] * crop.shape[1])
-            if red_ratio < 0.10:
-                return False
         return True
 
     def ai_worker():
@@ -212,13 +199,13 @@ def _sync_generate_frames(video_source, ref_settings):
                 continue
 
             try:
-                res = model.predict(f_proc, verbose=False, conf=0.15, iou=0.35, imgsz=512)
+                res = model.predict(f_proc, verbose=False, conf=0.10, iou=0.40, imgsz=640)
                 raw = []
                 if res and len(res) > 0 and res[0].boxes is not None:
                     bx = res[0].boxes.xyxy.cpu().numpy()
                     cf = res[0].boxes.conf.cpu().numpy()
                     for b, c in zip(bx, cf):
-                        if c < 0.15: continue
+                        if c < 0.10: continue
                         if not is_pure_comb(b, f_proc): continue
                         x1, y1, x2, y2 = map(int, b)
                         raw.append({
@@ -294,17 +281,16 @@ def _sync_generate_frames(video_source, ref_settings):
             if frame_no == 1:
                 # Frame 1 Synchronous Initialization: clean spatial sorting (Hen 1, 2, 3...)
                 try:
-                    res0 = model.predict(frame, verbose=False, conf=0.15, iou=0.35, imgsz=512)
+                    res0 = model.predict(frame, verbose=False, conf=0.10, iou=0.35, imgsz=640)
                     raw0 = []
                     if res0 and len(res0) > 0 and res0[0].boxes is not None:
                         bx = res0[0].boxes.xyxy.cpu().numpy()
                         cf = res0[0].boxes.conf.cpu().numpy()
                         for b, c in zip(bx, cf):
-                            if c < 0.15: continue
+                            if c < 0.10: continue
                             if not is_pure_comb(b, frame): continue
                             x1, y1, x2, y2 = map(int, b)
                             cy = (y1 + y2) / 2.0
-                            if not (roi_y1 <= cy <= roi_y2): continue
                             raw0.append({
                                 "box": (x1, y1, x2, y2),
                                 "center": ((x1 + x2) / 2.0, cy),
@@ -317,7 +303,7 @@ def _sync_generate_frames(video_source, ref_settings):
                         num = next_num
                         next_num += 1
                         hens[num] = {
-                            "center": det["center"], "lost": 0, "hits": 2,
+                            "center": det["center"], "vel": (0.0, 0.0), "lost": 0, "hits": 2,
                             "size": det["size"], "smooth_box": [float(v) for v in det["box"]],
                             "counted": True
                         }
@@ -329,29 +315,44 @@ def _sync_generate_frames(video_source, ref_settings):
                 # ─── Frame 2+: Ultra-fast LK Optical Flow (1.8 ms) ───
                 # Tracks every active hen's head motion on every single frame smoothly at 30 FPS
                 if prev_small_gray is not None and len(hens) > 0:
-                    active_ids = [n for n, d in hens.items() if d["lost"] <= 20 and d["center"][1] <= (roi_y2 + 40)]
+                    active_ids = [n for n, d in hens.items() if d["lost"] <= 25]
                     if len(active_ids) > 0:
                         pts_small = np.array([[[hens[n]["center"][0] / scale_x, hens[n]["center"][1] / scale_y]] for n in active_ids], dtype=np.float32)
                         new_pts, status, _ = cv2.calcOpticalFlowPyrLK(
                             prev_small_gray, small_gray, pts_small, None,
-                            winSize=(21, 21), maxLevel=2,
+                            winSize=(31, 31), maxLevel=3,
                             criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
                         )
                         for idx, num in enumerate(active_ids):
+                            ovx, ovy = hens[num].get("vel", (0.0, 0.0))
                             if status[idx][0] == 1:
                                 nx = float(new_pts[idx][0][0]) * scale_x
                                 ny = float(new_pts[idx][0][1]) * scale_y
                                 ox, oy = hens[num]["center"]
                                 dx = nx - ox
                                 dy = ny - oy
-                                if abs(dx) < 65 and abs(dy) < 65:
+                                if abs(dx) < 140 and abs(dy) < 140:
                                     hens[num]["center"] = (nx, ny)
                                     sb = hens[num]["smooth_box"]
                                     hens[num]["smooth_box"] = [sb[0] + dx, sb[1] + dy, sb[2] + dx, sb[3] + dy]
+                                    hens[num]["vel"] = (0.7 * ovx + 0.3 * dx, 0.7 * ovy + 0.3 * dy)
                                     hens[num]["lost"] = max(0, hens[num]["lost"] - 1)
                                 else:
+                                    # Large sudden jump: propagate velocity smoothly
+                                    cx, cy = hens[num]["center"]
+                                    hens[num]["center"] = (cx + ovx, cy + ovy)
+                                    sb = hens[num]["smooth_box"]
+                                    hens[num]["smooth_box"] = [sb[0] + ovx, sb[1] + ovy, sb[2] + ovx, sb[3] + ovy]
                                     hens[num]["lost"] += 1
                             else:
+                                # Feature momentarily occluded / fast motion: maintain tracking via velocity
+                                decay = 0.85 ** min(hens[num]["lost"], 8)
+                                dx = ovx * decay
+                                dy = ovy * decay
+                                cx, cy = hens[num]["center"]
+                                hens[num]["center"] = (cx + dx, cy + dy)
+                                sb = hens[num]["smooth_box"]
+                                hens[num]["smooth_box"] = [sb[0] + dx, sb[1] + dy, sb[2] + dx, sb[3] + dy]
                                 hens[num]["lost"] += 1
                 prev_small_gray = small_gray
 
@@ -375,23 +376,33 @@ def _sync_generate_frames(video_source, ref_settings):
                         det["box"] = (bx[0] + delta_cam_x, bx[1] + delta_cam_y, bx[2] + delta_cam_x, bx[3] + delta_cam_y)
                         det["center"] = (det["center"][0] + delta_cam_x, det["center"][1] + delta_cam_y)
 
-                    MATCH_RADIUS = 125.0
                     det_to_hen = {}
                     for d_idx, det in enumerate(dets):
                         best_n, best_d = None, float("inf")
                         for num, data in hens.items():
-                            if data["lost"] > 35: continue
-                            d = math.hypot(det["center"][0] - data["center"][0], det["center"][1] - data["center"][1])
-                            if d <= MATCH_RADIUS and d < best_d: best_d = d; best_n = num
+                            if data["lost"] > 40: continue
+                            # Match using predicted position based on velocity
+                            px = data["center"][0] + data.get("vel", (0.0, 0.0))[0] * min(data["lost"], 8)
+                            py = data["center"][1] + data.get("vel", (0.0, 0.0))[1] * min(data["lost"], 8)
+                            d = math.hypot(det["center"][0] - px, det["center"][1] - py)
+                            match_radius = min(260.0, 160.0 + data["lost"] * 6.0)
+                            if d <= match_radius and d < best_d:
+                                best_d = d
+                                best_n = num
                         if best_n is not None: det_to_hen[d_idx] = (best_n, best_d)
 
                     hen_to_det = {}
                     for num, data in hens.items():
-                        if data["lost"] > 35: continue
+                        if data["lost"] > 40: continue
+                        px = data["center"][0] + data.get("vel", (0.0, 0.0))[0] * min(data["lost"], 8)
+                        py = data["center"][1] + data.get("vel", (0.0, 0.0))[1] * min(data["lost"], 8)
                         best_idx, best_d = None, float("inf")
                         for d_idx, det in enumerate(dets):
-                            d = math.hypot(det["center"][0] - data["center"][0], det["center"][1] - data["center"][1])
-                            if d <= MATCH_RADIUS and d < best_d: best_d = d; best_idx = d_idx
+                            d = math.hypot(det["center"][0] - px, det["center"][1] - py)
+                            match_radius = min(260.0, 160.0 + data["lost"] * 6.0)
+                            if d <= match_radius and d < best_d:
+                                best_d = d
+                                best_idx = d_idx
                         if best_idx is not None: hen_to_det[num] = (best_idx, best_d)
 
                     matched = set()
@@ -401,35 +412,45 @@ def _sync_generate_frames(video_source, ref_settings):
                             matched.add(d_idx); used.add(num)
                             det = dets[d_idx]
                             data = hens[num]
+                            old_cx, old_cy = data["center"]
+                            new_cx, new_cy = det["center"]
+                            ovx, ovy = data.get("vel", (0.0, 0.0))
+                            data["vel"] = (0.6 * ovx + 0.4 * (new_cx - old_cx), 0.6 * ovy + 0.4 * (new_cy - old_cy))
+                            data["center"] = (new_cx, new_cy)
                             data["lost"] = 0
                             data["hits"] = data.get("hits", 1) + 1
                             raw = det["box"]
                             sb = data["smooth_box"]
-                            data["smooth_box"] = [0.65 * raw[i] + 0.35 * sb[i] for i in range(4)]
-                            data["center"] = ((data["smooth_box"][0] + data["smooth_box"][2]) / 2.0, (data["smooth_box"][1] + data["smooth_box"][3]) / 2.0)
+                            data["smooth_box"] = [0.80 * raw[i] + 0.20 * sb[i] for i in range(4)]
 
                     for d_idx, det in enumerate(dets):
                         if d_idx in matched: continue
-                        # Only register new hens if inside the detection zone
-                        if not (roi_y1 <= det["center"][1] <= roi_y2):
-                            continue
                         reassigned = None
                         closest_d = float("inf")
                         for num, data in hens.items():
-                            if num in used or data["lost"] > 35: continue
-                            d = math.hypot(det["center"][0] - data["center"][0], det["center"][1] - data["center"][1])
-                            if d <= MATCH_RADIUS and d < closest_d: closest_d = d; reassigned = num
+                            if num in used or data["lost"] > 40: continue
+                            px = data["center"][0] + data.get("vel", (0.0, 0.0))[0] * min(data["lost"], 8)
+                            py = data["center"][1] + data.get("vel", (0.0, 0.0))[1] * min(data["lost"], 8)
+                            d = math.hypot(det["center"][0] - px, det["center"][1] - py)
+                            match_radius = min(260.0, 160.0 + data["lost"] * 6.0)
+                            if d <= match_radius and d < closest_d:
+                                closest_d = d
+                                reassigned = num
                         if reassigned is not None:
                             num = reassigned
                             data = hens[num]
-                            data["center"] = det["center"]
+                            old_cx, old_cy = data["center"]
+                            new_cx, new_cy = det["center"]
+                            ovx, ovy = data.get("vel", (0.0, 0.0))
+                            data["vel"] = (0.6 * ovx + 0.4 * (new_cx - old_cx), 0.6 * ovy + 0.4 * (new_cy - old_cy))
+                            data["center"] = (new_cx, new_cy)
                             data["lost"] = 0
                             data["hits"] = data.get("hits", 1) + 1
                             data["smooth_box"] = [float(v) for v in det["box"]]
                         else:
                             num = next_num; next_num += 1
                             hens[num] = {
-                                "center": det["center"], "lost": 0, "hits": 2,
+                                "center": det["center"], "vel": (0.0, 0.0), "lost": 0, "hits": 2,
                                 "size": det["size"], "smooth_box": [float(v) for v in det["box"]],
                                 "counted": True
                             }
@@ -442,17 +463,19 @@ def _sync_generate_frames(video_source, ref_settings):
                         ai_pending_fno = frame_no
                         ai_pending_epoch = loop_epoch
 
-            # Expire any hens that have exited below the detection zone or bottom of screen
+            # Expire only hens that have been lost for too long or left the screen completely
             for num, data in hens.items():
-                cy = data["center"][1]
-                if cy > (roi_y2 + 25) or cy > (frame.shape[0] - 40):
+                cx, cy = data["center"]
+                if data["lost"] > 60:
+                    data["lost"] = 999
+                elif cy > (frame.shape[0] + 60) or cy < -60 or cx < -60 or cx > (frame.shape[1] + 60):
                     data["lost"] = 999
 
             total_counted = len([h for h in hens.values() if h.get("hits", 0) >= 2])
             current_total_count = total_counted
             visible_in_zone = len([
                 h for h in hens.values()
-                if h["lost"] <= 5 and (roi_y1 <= h["center"][1] <= roi_y2)
+                if h["lost"] <= 20
             ])
 
             # Fast 720p display rendering & JPEG encoding (6ms total!)
@@ -467,24 +490,37 @@ def _sync_generate_frames(video_source, ref_settings):
                         (r_x1 + 10, r_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2, cv2.LINE_AA)
 
             for num, data in hens.items():
-                if data["lost"] <= 5 and data.get("hits", 0) >= 2:
+                if data["lost"] <= 25 and data.get("hits", 0) >= 2:
                     cy = data["center"][1]
-                    # NEVER draw outside the detection zone or at the bottom border!
-                    if not (roi_y1 <= cy <= roi_y2):
-                        continue
-                    if cy > (frame.shape[0] - 50):
+                    cx = data["center"][0]
+                    # Do not draw if way off screen
+                    if cy < -20 or cy > (frame.shape[0] + 20) or cx < -20 or cx > (frame.shape[1] + 20):
                         continue
 
                     sb = data["smooth_box"]
                     x1 = int(sb[0] * scale_disp_x); y1 = int(sb[1] * scale_disp_y)
                     x2 = int(sb[2] * scale_disp_x); y2 = int(sb[3] * scale_disp_y)
                     
-                    cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    # Ensure coordinates are within display boundary
+                    x1 = max(0, min(1279, x1))
+                    y1 = max(0, min(719, y1))
+                    x2 = max(0, min(1279, x2))
+                    y2 = max(0, min(719, y2))
+                    if x2 <= x1 + 4 or y2 <= y1 + 4:
+                        continue
+
+                    # Fresh detection = solid bright green; smoothly coasting = slight fade
+                    color = (0, 255, 0)
+                    if data["lost"] > 6:
+                        fade = max(0.4, 1.0 - (data["lost"] / 25.0))
+                        color = (0, int(255 * fade), int(200 * (1 - fade)))
+
+                    cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
                     label = f"HEN {num}"
                     (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-                    cv2.rectangle(display, (x1, max(y1 - 22, 0)), (x1 + w_txt + 4, max(y1, 22)), (0, 255, 0), -1)
+                    cv2.rectangle(display, (x1, max(y1 - 22, 0)), (x1 + w_txt + 4, max(y1, 22)), color, -1)
                     cv2.putText(display, label, (x1 + 2, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
-                    cv2.circle(display, (int((x1 + x2) / 2), int((y1 + y2) / 2)), 4, (0, 255, 0), -1)
+                    cv2.circle(display, (int((x1 + x2) / 2), int((y1 + y2) / 2)), 4, color, -1)
 
             time_s = frame_no / fps
 

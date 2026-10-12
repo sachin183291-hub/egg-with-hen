@@ -355,24 +355,10 @@ class LiveHenTracker:
         x1, y1, x2, y2 = map(int, box)
         w = x2 - x1
         h = y2 - y1
-        area = w * h
-        # Strict comb / head dimensions (25-165px) - excludes large hen body (200-500px)
-        if w < 25 or h < 25 or w > 165 or h > 165:
+        if w <= 8 or h <= 8:
             return False
-        if area < 900 or area > 22000:
+        if w > 350 or h > 350:
             return False
-        aspect = w / float(max(h, 1))
-        if aspect < 0.35 or aspect > 2.2:
-            return False
-        # Red comb color verification in HSV
-        crop = frame[max(0, y1):min(frame.shape[0], y2), max(0, x1):min(frame.shape[1], x2)]
-        if crop.size > 0:
-            hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-            mask1 = cv2.inRange(hsv, np.array([0, 35, 35]), np.array([16, 255, 255]))
-            mask2 = cv2.inRange(hsv, np.array([150, 35, 35]), np.array([180, 255, 255]))
-            red_ratio = (cv2.countNonZero(mask1) + cv2.countNonZero(mask2)) / float(crop.shape[0] * crop.shape[1])
-            if red_ratio < 0.10:
-                return False
         return True
 
     def tracking_loop(self):
