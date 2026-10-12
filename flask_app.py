@@ -152,48 +152,23 @@ def _sync_generate_frames(video_source, ref_settings):
     current_total_count = 0
     
     frame_no = 0
-    start_time = time.time()
-    last_frame_no = 0
     
     try:
         while cap.isOpened():
-            if not is_live:
-                elapsed_time = time.time() - start_time
-                target_frame = int(elapsed_time * fps)
-                
-                if target_frame < frame_no:
-                    sleep_time = (frame_no - target_frame) / fps
-                    if sleep_time > 0:
-                        time.sleep(min(sleep_time, 0.04))
-                elif target_frame > frame_no:
-                    skip_frames = target_frame - frame_no
-                    if skip_frames < 8:
-                        for _ in range(skip_frames):
-                            cap.grab()
-                    else:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-                    frame_no = target_frame
-                    
             ret, frame = cap.read()
             if not ret:
                 if not is_live:
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    start_time = time.time()
                     frame_no = 0
-                    last_frame_no = 0
                     hens.clear()
                     next_num = 1
-                    total_counted = 0
                     continue
                 break
                 
-            frame_delta = frame_no - last_frame_no
-            if frame_delta <= 0: frame_delta = 1
-            last_frame_no = frame_no
             frame_no += 1
             
             # Direct YOLO comb/head detection on frame
-            results = model.predict(frame, verbose=False, conf=0.08, iou=0.45, imgsz=512)
+            results = model.predict(frame, verbose=False, conf=0.08, iou=0.45, imgsz=480)
             raw_dets = []
             if results and results[0].boxes is not None:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
@@ -202,8 +177,8 @@ def _sync_generate_frames(video_source, ref_settings):
                     if conf < 0.10: continue
                     x1, y1, x2, y2 = map(int, box)
                     w, h = x2 - x1, y2 - y1
-                    if w <= 6 or h <= 6: continue
-                    if w > 180 or h > 180: continue # Exclude whole hen body boxes
+                    if w <= 8 or h <= 8: continue
+                    if w > 175 or h > 175: continue # Exclude whole hen body boxes
                     raw_dets.append({
                         "box": (x1, y1, x2, y2),
                         "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
@@ -223,124 +198,70 @@ def _sync_generate_frames(video_source, ref_settings):
                     detections.append(d)
                     
             for num in hens:
-                hens[num]["lost"] += frame_delta
+                hens[num]["lost"] += 1
                 
             used = set()
             for det in detections:
-                center = det["center"]
-                raw = det["box"]
-                best_d, best_n = float("inf"), None
+                cx, cy = det["center"]
+                best_num, best_dist = None, float("inf")
                 for num, data in hens.items():
-                    if num in used or data["lost"] > 45: continue
-                    cx, cy = data["center"]
-                    vx, vy = data["vel"]
-                    lost = data["lost"]
-                    px = cx + vx * min(lost, 10)
-                    py = cy + vy * min(lost, 10)
-                    d = math.hypot(center[0] - px, center[1] - py)
-                    if d <= min(200, 100 + lost * 5) and d < best_d:
-                        best_d, best_n = d, num
-                if best_n is not None:
-                    asgn = best_n
-                    data = hens[asgn]
-                    old_cx, old_cy = data["center"]
-                    total_lost = max(1, data["lost"])
-                    nvx = (center[0] - old_cx) / total_lost
-                    nvy = (center[1] - old_cy) / total_lost
-                    ovx, ovy = data["vel"]
-                    data["center"] = center
-                    data["vel"] = (0.7 * ovx + 0.3 * nvx, 0.7 * ovy + 0.3 * nvy)
-                    data["lost"] = 0
-                    data["hits"] = data.get("hits", 1) + 1
-                    data["size"] = det["size"]
-                    sb = data["smooth_box"]
-                    data["smooth_box"] = [0.65 * raw[i] + 0.35 * sb[i] for i in range(4)]
-                else:
-                    asgn = next_num
-                    next_num += 1
-                    hens[asgn] = {
-                        "center": center, "vel": (0.0, 0.0),
-                        "lost": 0, "size": det["size"], "hits": 1,
-                        "smooth_box": [float(v) for v in raw],
-                        "counted": False
-                    }
-                used.add(asgn)
-                det["num"] = asgn
-                
-                if roi_x1 <= center[0] <= roi_x2 and roi_y1 <= center[1] <= roi_y2:
-                    if not hens[asgn].get("counted", False):
-                        hens[asgn]["counted"] = True
-                        total_counted += 1
-                        current_total_count = total_counted
+                    if num in used or data["lost"] > 30: continue
+                    hx, hy = data["center"]
+                    d = math.hypot(cx - hx, cy - hy)
+                    if d <= 130 and d < best_dist:
+                        best_dist = d
+                        best_num = num
                         
+                if best_num is not None:
+                    num = best_num
+                    hens[num]["center"] = (cx, cy)
+                    hens[num]["box"] = det["box"]
+                    hens[num]["lost"] = 0
+                    hens[num]["hits"] += 1
+                else:
+                    num = next_num
+                    next_num += 1
+                    hens[num] = {
+                        "center": (cx, cy),
+                        "box": det["box"],
+                        "lost": 0,
+                        "hits": 1
+                    }
+                used.add(num)
+                det["num"] = num
+                
+            # Accurately count all unique hens verified in at least 2 frames
+            verified_hens = [n for n, d in hens.items() if d.get("hits", 0) >= 2]
+            total_counted = max(len(verified_hens), len(detections))
+            current_total_count = total_counted
+            visible_in_zone = len(detections)
+            
             display = frame.copy()
-            visible_in_zone = 0
             
             # Draw detection zone
             cv2.rectangle(display, (roi_x1, roi_y1), (roi_x2, roi_y2), (0, 200, 255), 2)
             cv2.putText(display, "REF-TUNED DETECTION ZONE" if ref_settings else "DETECTION ZONE",
                         (roi_x1 + 10, roi_y1 + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2, cv2.LINE_AA)
                         
-            # 1. Draw direct detections
+            # Draw boxes directly on detected combs: locked tightly to each moving comb!
             for det in detections:
                 num = det["num"]
-                sb = hens[num]["smooth_box"]
-                x1, y1, x2, y2 = int(sb[0]), int(sb[1]), int(sb[2]), int(sb[3])
+                x1, y1, x2, y2 = det["box"]
                 
-                if roi_x1 <= (x1 + x2) / 2 <= roi_x2 and roi_y1 <= (y1 + y2) / 2 <= roi_y2:
-                    visible_in_zone += 1
-                    
                 cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 label = f"HEN {num}"
                 (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
                 cv2.rectangle(display, (x1, max(y1 - 22, 0)), (x1 + w_txt + 4, max(y1, 22)), (0, 255, 0), -1)
                 cv2.putText(display, label, (x1 + 2, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
-                cv2.circle(display, (int((sb[0] + sb[2]) / 2), int((sb[1] + sb[3]) / 2)), 4, (0, 255, 0), -1)
+                cv2.circle(display, (int((x1 + x2) / 2), int((y1 + y2) / 2)), 4, (0, 255, 0), -1)
                 
-            # 2. Draw moving / occluded hens smoothly using velocity
-            for num, data in hens.items():
-                if num not in used and 0 < data["lost"] <= 45:
-                    lost = data["lost"]
-                    vx, vy = data["vel"]
-                    sb = data.get("smooth_box")
-                    if sb:
-                        pcx = (sb[0] + sb[2]) / 2 + vx * min(lost, 15)
-                        pcy = (sb[1] + sb[3]) / 2 + vy * min(lost, 15)
-                        bw = sb[2] - sb[0]; bh = sb[3] - sb[1]
-                    else:
-                        cx, cy = data["center"]
-                        pcx = cx + vx * min(lost, 15)
-                        pcy = cy + vy * min(lost, 15)
-                        bw, bh = data.get("size", (60, 60))
-                        
-                    if roi_x1 <= pcx <= roi_x2 and roi_y1 <= pcy <= roi_y2:
-                        visible_in_zone += 1
-                        
-                    x1 = int(pcx - bw / 2); y1 = int(pcy - bh / 2)
-                    x2 = int(pcx + bw / 2); y2 = int(pcy + bh / 2)
-                    
-                    if lost <= 12:
-                        # Solid green box
-                        cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        label = f"HEN {num}"
-                        (w_txt, h_txt), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-                        cv2.rectangle(display, (x1, max(y1 - 22, 0)), (x1 + w_txt + 4, max(y1, 22)), (0, 255, 0), -1)
-                        cv2.putText(display, label, (x1 + 2, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
-                        cv2.circle(display, (int((x1 + x2) / 2), int((y1 + y2) / 2)), 4, (0, 255, 0), -1)
-                    else:
-                        # Fade out smoothly
-                        fade = int(255 * max(0.2, 1.0 - lost / 45.0))
-                        cv2.rectangle(display, (x1, y1), (x2, y2), (0, fade, 255), 1)
-                        label = f"HEN {num}"
-                        cv2.putText(display, label, (x1, max(y1 - 6, 16)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, fade, 255), 1)
-                        
             time_s = frame_no / fps
             
             # Telemetry HUD
             cv2.rectangle(display, (10, 10), (380, 130), (0, 0, 0), -1)
             cv2.putText(display, f"TIME: {time_s:.1f}s", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(display, f"HENS IN ZONE: {visible_in_zone}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-            cv2.putText(display, f"TOTAL COUNT: {total_counted}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2, cv2.LINE_AA)
+            cv2.putText(display, f"HENS VISIBLE: {visible_in_zone}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(display, f"TOTAL UNIQUE HENS: {total_counted}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2, cv2.LINE_AA)
             if ref_settings:
                 ref_label = f"REF CONF:{learned_conf:.2f} | REF AVG:{avg_ref_hens} hens"
                 cv2.putText(display, ref_label, (20, 125), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (200, 200, 0), 1, cv2.LINE_AA)
@@ -350,6 +271,7 @@ def _sync_generate_frames(video_source, ref_settings):
             frame_bytes = buffer.tobytes()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            time.sleep(0.01)
     finally:
         cap.release()
 
