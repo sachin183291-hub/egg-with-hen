@@ -112,8 +112,31 @@ def _sync_generate_frames(video_source, ref_settings):
     if is_live:
         cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if os.name == 'nt' else cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if not cap.isOpened() or os.environ.get("RENDER") == "true":
+            fallback_demos = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "backend", "demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.getcwd(), "backend", "demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.getcwd(), "demo_hen_video.mp4")),
+            ]
+            demo = next((p for p in fallback_demos if os.path.exists(p)), None)
+            if demo:
+                cap = cv2.VideoCapture(demo)
+                is_live = False
     else:
-        cap = cv2.VideoCapture(video_source)
+        # Check if video source exists, if not fall back to demo_hen_video.mp4
+        actual_source = video_source
+        if not os.path.exists(actual_source):
+            fallback_demos = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "backend", "demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.getcwd(), "backend", "demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.getcwd(), "demo_hen_video.mp4")),
+            ]
+            demo = next((p for p in fallback_demos if os.path.exists(p)), None)
+            if demo:
+                actual_source = demo
+        cap = cv2.VideoCapture(actual_source)
         
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_delay = 1.0 / fps
@@ -124,8 +147,9 @@ def _sync_generate_frames(video_source, ref_settings):
         
     orig_h, orig_w = sample_frame.shape[:2]
     OUT_W, OUT_H = 854, 480
-    sx = OUT_W / float(orig_w)
-    sy = OUT_H / float(orig_h)
+    AI_W, AI_H = 960, 540
+    sx = OUT_W / float(AI_W)
+    sy = OUT_H / float(AI_H)
     
     if not is_live:
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -146,8 +170,8 @@ def _sync_generate_frames(video_source, ref_settings):
             bw = x2 - x1
             bh = y2 - y1
             # Filter non-comb structures (roof beams / floor troughs / bars)
-            if y1 < orig_h * 0.04 and bw > 150: continue
-            if bw < 12 or bh < 12 or bw > 250 or bh > 250: continue
+            if y1 < AI_H * 0.04 and bw > 140: continue
+            if bw < 8 or bh < 8 or bw > 160 or bh > 160: continue
             if bw / bh > 2.8 or bh / bw > 2.8: continue
             
             # Scale coordinates directly to output stream resolution
@@ -183,7 +207,7 @@ def _sync_generate_frames(video_source, ref_settings):
                 kept.append(d)
         return kept
 
-    # Asynchronous YOLO worker running on full frame with high-recall conf=0.08
+    # Asynchronous YOLO worker running with imgsz=512, conf=0.08
     ai_lock = threading.Lock()
     ai_frame = None
     ai_results = None
@@ -201,7 +225,8 @@ def _sync_generate_frames(video_source, ref_settings):
                 time.sleep(0.02)
                 continue
             try:
-                res = model.predict(f, imgsz=640, conf=0.08, verbose=False)[0]
+                f_ai = cv2.resize(f, (AI_W, AI_H)) if (f.shape[1] != AI_W or f.shape[0] != AI_H) else f
+                res = model.predict(f_ai, imgsz=512, conf=0.08, verbose=False)[0]
                 if res.boxes is not None:
                     bx = res.boxes.xyxy.cpu().numpy()
                     cf = res.boxes.conf.cpu().numpy()
@@ -214,11 +239,12 @@ def _sync_generate_frames(video_source, ref_settings):
     worker_thread = threading.Thread(target=ai_worker, daemon=True)
     worker_thread.start()
     
-    # 100% recall initialization on frame 0 on full crisp frame
+    # 100% recall initialization on frame 0
     disp0 = cv2.resize(sample_frame, (OUT_W, OUT_H))
     prev_gray = cv2.cvtColor(disp0, cv2.COLOR_BGR2GRAY)
     try:
-        init_res = model.predict(sample_frame, imgsz=640, conf=0.08, verbose=False)[0]
+        f0_ai = cv2.resize(sample_frame, (AI_W, AI_H))
+        init_res = model.predict(f0_ai, imgsz=512, conf=0.08, verbose=False)[0]
         if init_res.boxes is not None:
             init_dets = filter_and_scale_dets(init_res.boxes.xyxy.cpu().numpy(), init_res.boxes.conf.cpu().numpy())
             for d in init_dets:
@@ -358,7 +384,7 @@ def _sync_generate_frames(video_source, ref_settings):
             if frame_no - last_ai_frame_no >= 25:
                 with ai_lock:
                     if ai_frame is None and ai_results is None:
-                        ai_frame = frame.copy()
+                        ai_frame = cv2.resize(frame, (AI_W, AI_H))
                         last_ai_frame_no = frame_no
                         
             # 4. Counting & Drawing

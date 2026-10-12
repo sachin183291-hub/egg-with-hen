@@ -124,28 +124,73 @@ async def tracker_stream_count():
 async def stream_video_file(filename: str):
     filepath = str(UPLOAD_DIR / filename)
     if not os.path.exists(filepath):
-        # Fallback check relative to cwd
-        alt_path = os.path.abspath(os.path.join("uploads", filename))
-        if os.path.exists(alt_path):
-            filepath = alt_path
+        # Fallback check relative to cwd or root uploads
+        possible = [
+            os.path.abspath(os.path.join("uploads", filename)),
+            os.path.abspath(os.path.join("backend", "uploads", filename)),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", filename)),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../demo_hen_video.mp4")),
+            os.path.abspath(os.path.join(os.getcwd(), "demo_hen_video.mp4")),
+            os.path.abspath(os.path.join(os.getcwd(), "backend", "demo_hen_video.mp4")),
+        ]
+        found = next((p for p in possible if os.path.exists(p)), None)
+        if found:
+            filepath = found
         else:
             raise HTTPException(status_code=404, detail=f"Video '{filename}' not found on server")
+            
     if not flask_app:
         raise HTTPException(status_code=500, detail="Video streaming module not available")
+        
     ref = flask_app.reference_settings if flask_app.reference_settings.get("reference_video") else None
+    stream_headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate, no-transform",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+    }
     return StreamingResponse(
         flask_app._sync_generate_frames(filepath, ref),
-        media_type='multipart/x-mixed-replace; boundary=frame'
+        media_type='multipart/x-mixed-replace; boundary=frame',
+        headers=stream_headers
     )
 
 @router.get("/stream_video")
 async def stream_video_cam():
     if not flask_app:
         raise HTTPException(status_code=500, detail="Streaming module not initialized")
+    
+    stream_headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate, no-transform",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+    }
+    
+    # In cloud environments without physical camera, stream demo hen video
     if os.environ.get("RENDER") == "true":
-        raise HTTPException(status_code=400, detail="Server camera not available in cloud deployment. Please use video upload or client camera.")
+        demo_paths = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../demo_hen_video.mp4")),
+            os.path.abspath(os.path.join(os.getcwd(), "demo_hen_video.mp4")),
+            os.path.abspath(os.path.join(os.getcwd(), "backend", "demo_hen_video.mp4")),
+        ]
+        demo_found = next((p for p in demo_paths if os.path.exists(p)), None)
+        if demo_found:
+            ref = flask_app.reference_settings if flask_app.reference_settings.get("reference_video") else None
+            return StreamingResponse(
+                flask_app._sync_generate_frames(demo_found, ref),
+                media_type='multipart/x-mixed-replace; boundary=frame',
+                headers=stream_headers
+            )
+        raise HTTPException(status_code=400, detail="Server camera not available in cloud deployment. Please use video upload.")
+        
     ref = flask_app.reference_settings if flask_app.reference_settings.get("reference_video") else None
     return StreamingResponse(
         flask_app._sync_generate_frames('camera', ref),
-        media_type='multipart/x-mixed-replace; boundary=frame'
+        media_type='multipart/x-mixed-replace; boundary=frame',
+        headers=stream_headers
     )

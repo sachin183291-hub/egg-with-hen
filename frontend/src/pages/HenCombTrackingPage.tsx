@@ -105,7 +105,7 @@ export default function HenCombTrackingPage() {
             <div 
               className="ref-mode-btn"
               onClick={() => {
-                setStreamUrl(`${backendUrl}/stream_video/DJI_20260911145052_0001_S.MP4?t=${Date.now()}`)
+                setStreamUrl(`${backendUrl}/stream_video/demo_hen_video.mp4?t=${Date.now()}`)
                 setStreamMode('camera')
               }}
               style={{ padding: '30px 18px', borderRadius: 16, border: '2px solid rgba(168,85,247,0.4)', background: 'rgba(168,85,247,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
