@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/auth", tags=["Auth"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
-async def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
+def register(body: RegisterRequest, request: Request, db: Session = Depends(get_db)):
     """Register a new user account. Role defaults to FIELD_OFFICER."""
     # Check duplicate email
     if db.query(User).filter(User.email == body.email).first():
@@ -50,7 +50,7 @@ async def register(body: RegisterRequest, request: Request, db: Session = Depend
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Authenticate user and return JWT tokens."""
     user = db.query(User).filter(
         User.email == body.email,
@@ -89,7 +89,7 @@ async def login(body: LoginRequest, request: Request, db: Session = Depends(get_
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
+def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     """Use a refresh token to obtain a new access token."""
     payload = verify_refresh_token(body.refresh_token)
     if not payload:
@@ -111,7 +111,7 @@ async def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/logout")
-async def logout(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def logout(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Logout — client should discard tokens. Log the event."""
     log_action(
         db, AuditActionEnum.LOGOUT,
@@ -123,7 +123,7 @@ async def logout(request: Request, current_user: User = Depends(get_current_user
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(current_user: User = Depends(get_current_user)):
+def me(current_user: User = Depends(get_current_user)):
     """Return the currently authenticated user's profile."""
     return current_user
 

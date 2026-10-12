@@ -41,7 +41,7 @@ def get_model_path():
     return "yolov8n.pt"
 
 @router.post("/live_frame")
-async def live_frame(
+def live_frame(
     frame: UploadFile = File(...),
     frame_number: int = Form(0),
     video_time: float = Form(0.0)
@@ -51,7 +51,7 @@ async def live_frame(
         model_path = get_model_path()
         global_live_tracker = OpticalHenTracker(model_path)
         
-    raw = await frame.read()
+    raw = frame.file.read()
     np_arr = np.frombuffer(raw, np.uint8)
     img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
     
@@ -62,7 +62,7 @@ async def live_frame(
     return result
 
 @router.post("/reset")
-async def reset_tracking():
+def reset_tracking():
     global global_live_tracker
     if global_live_tracker is not None:
         global_live_tracker.reset_state()
