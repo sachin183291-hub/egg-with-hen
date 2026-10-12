@@ -68,7 +68,7 @@ class OpticalHenTracker:
         # Non-blocking lock for fast UI
         if not self.inference_lock.acquire(blocking=False):
             with self.state_lock:
-                verified_total = len([h for h in self.hens.values() if h.get("hits", 0) >= (1 if frame_number <= 3 else 2)])
+                verified_total = len([h for h in self.hens.values() if h.get("hits", 0) >= 1])
                 return {
                     "success": True, "busy": True, "video_time": video_time,
                     "detections": self.latest_detections,
@@ -103,13 +103,18 @@ class OpticalHenTracker:
                         sb = data["smooth_box"]
                         data["smooth_box"] = [sb[0] + cam_dx, sb[1] + cam_dy, sb[2] + cam_dx, sb[3] + cam_dy]
 
-            # ─── 1. Run YOLO inference ───
+            # ─── 1. Run YOLO inference (Optimized for 512MB RAM and 100% comb recall) ───
+            AI_W, AI_H = 960, 540
+            f_ai = cv2.resize(frame, (AI_W, AI_H)) if (fw != AI_W or fh != AI_H) else frame
+            scale_x = fw / float(AI_W)
+            scale_y = fh / float(AI_H)
+
             results = self.model.predict(
-                source=frame,
+                source=f_ai,
                 verbose=False, 
-                conf=0.10,
-                iou=0.40,
-                imgsz=640,
+                conf=0.08,
+                iou=0.45,
+                imgsz=512,
                 device=self.DEVICE
             )
 
@@ -119,40 +124,38 @@ class OpticalHenTracker:
                 confs = results[0].boxes.conf.cpu().numpy()
 
                 for box, conf in zip(boxes, confs):
-                    if conf < 0.10: continue
-                    if not self.is_pure_comb(box, frame): continue
-                    x1, y1, x2, y2 = map(int, box)
+                    if conf < 0.08: continue
+                    x1 = box[0] * scale_x
+                    y1 = box[1] * scale_y
+                    x2 = box[2] * scale_x
+                    y2 = box[3] * scale_y
+                    bw, bh = x2 - x1, y2 - y1
+                    if bw < 8 or bh < 8 or bw > 300 or bh > 300: continue
+                    if bw / bh > 2.8 or bh / bw > 2.8: continue
                     raw_detections.append({
-                        "box": [x1, y1, x2, y2],
+                        "box": [int(x1), int(y1), int(x2), int(y2)],
                         "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
-                        "size": (x2 - x1, y2 - y1),
+                        "size": (bw, bh),
                         "conf": float(conf)
                     })
 
-            # Sort purely by confidence so compact comb boxes are preferred over any stray large boxes
+            # Sort purely by confidence
             raw_detections.sort(key=lambda d: d["conf"], reverse=True)
 
-            # ─── 2. Strict 1-Box-Per-Hen Deduplication ───
+            # ─── 2. Deduplicate only true overlapping boxes (IoU > 0.45) ───
+            # Keeps neighboring hens even when standing closely side-by-side
             detections = []
             for r_det in raw_detections:
                 rx1, ry1, rx2, ry2 = r_det["box"]
-                rcx, rcy = r_det["center"]
                 is_duplicate = False
                 for existing in detections:
                     ex1, ey1, ex2, ey2 = existing["box"]
-                    ecx, ecy = existing["center"]
-                    if math.hypot(rcx - ecx, rcy - ecy) < 45:
-                        is_duplicate = True
-                        break
-                    if (ex1 <= rcx <= ex2 and ey1 <= rcy <= ey2) or (rx1 <= ecx <= rx2 and ry1 <= ecy <= ry2):
-                        is_duplicate = True
-                        break
                     ix1, iy1 = max(rx1, ex1), max(ry1, ey1)
                     ix2, iy2 = min(rx2, ex2), min(ry2, ey2)
                     iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
                     inter_area = iw * ih
                     union_area = (rx2 - rx1) * (ry2 - ry1) + (ex2 - ex1) * (ey2 - ey1) - inter_area
-                    if union_area > 0 and (inter_area / union_area) > 0.30:
+                    if union_area > 0 and (inter_area / union_area) > 0.45:
                         is_duplicate = True
                         break
                 if not is_duplicate:
@@ -308,7 +311,7 @@ class OpticalHenTracker:
                     self.ai_fps = 1.0 / elapsed
                 
                 # Count verified established hens
-                verified_total = len([h for h in self.hens.values() if h.get("hits", 0) >= (1 if frame_number <= 3 else 2)])
+                verified_total = len([h for h in self.hens.values() if h.get("hits", 0) >= 1])
 
                 self.latest_detections = out_detections
                 self.latest_frame_number = frame_number
