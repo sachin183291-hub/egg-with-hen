@@ -122,7 +122,10 @@ def _sync_generate_frames(video_source, ref_settings):
         cap.release()
         return
         
+    orig_h, orig_w = sample_frame.shape[:2]
     OUT_W, OUT_H = 854, 480
+    sx = OUT_W / float(orig_w)
+    sy = OUT_H / float(orig_h)
     
     if not is_live:
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -136,7 +139,51 @@ def _sync_generate_frames(video_source, ref_settings):
     global current_total_count
     current_total_count = 0
     
-    # Asynchronous YOLO worker for periodic high-accuracy detection at imgsz=512
+    def filter_and_scale_dets(raw_boxes, raw_confs):
+        dets = []
+        for b, c in zip(raw_boxes, raw_confs):
+            x1, y1, x2, y2 = map(float, b)
+            bw = x2 - x1
+            bh = y2 - y1
+            # Filter non-comb structures (roof beams / floor troughs / bars)
+            if y1 < orig_h * 0.04 and bw > 150: continue
+            if bw < 12 or bh < 12 or bw > 250 or bh > 250: continue
+            if bw / bh > 2.8 or bh / bw > 2.8: continue
+            
+            # Scale coordinates directly to output stream resolution
+            dx1, dy1, dx2, dy2 = x1 * sx, y1 * sy, x2 * sx, y2 * sy
+            cx, cy = (dx1 + dx2) / 2.0, (dy1 + dy2) / 2.0
+            dets.append({
+                "box": [dx1, dy1, dx2, dy2],
+                "center": (cx, cy),
+                "conf": float(c)
+            })
+        dets.sort(key=lambda d: d["conf"], reverse=True)
+        # Deduplicate overlapping bounding boxes (IoU > 0.45) - DO NOT remove close adjacent hens!
+        kept = []
+        for d in dets:
+            b1 = d["box"]
+            overlap = False
+            for ex in kept:
+                b2 = ex["box"]
+                ix1 = max(b1[0], b2[0])
+                iy1 = max(b1[1], b2[1])
+                ix2 = min(b1[2], b2[2])
+                iy2 = min(b1[3], b2[3])
+                iw = max(0, ix2 - ix1)
+                ih = max(0, iy2 - iy1)
+                inter = iw * ih
+                area1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
+                area2 = (b2[2] - b2[0]) * (b2[3] - b2[1])
+                union = area1 + area2 - inter
+                if union > 0 and (inter / union) > 0.45:
+                    overlap = True
+                    break
+            if not overlap:
+                kept.append(d)
+        return kept
+
+    # Asynchronous YOLO worker running on full frame with high-recall conf=0.08
     ai_lock = threading.Lock()
     ai_frame = None
     ai_results = None
@@ -154,57 +201,30 @@ def _sync_generate_frames(video_source, ref_settings):
                 time.sleep(0.02)
                 continue
             try:
-                res = model.predict(f, imgsz=512, conf=0.18, verbose=False)[0]
-                dets = []
+                res = model.predict(f, imgsz=640, conf=0.08, verbose=False)[0]
                 if res.boxes is not None:
                     bx = res.boxes.xyxy.cpu().numpy()
                     cf = res.boxes.conf.cpu().numpy()
-                    for b, c in zip(bx, cf):
-                        x1, y1, x2, y2 = map(float, b)
-                        bw = x2 - x1
-                        bh = y2 - y1
-                        # Filter out ceiling beams / non-comb noise
-                        if y1 < OUT_H * 0.04 and bw > 140:
-                            continue
-                        if bw < 8 or bh < 8 or bw > 140 or bh > 140:
-                            continue
-                        cx = (x1 + x2) / 2.0
-                        cy = (y1 + y2) / 2.0
-                        dets.append({
-                            "box": [x1, y1, x2, y2],
-                            "center": (cx, cy),
-                            "conf": float(c)
-                        })
-                dets.sort(key=lambda d: d["conf"], reverse=True)
-                filtered = []
-                for d in dets:
-                    if not any(math.hypot(d["center"][0] - ex["center"][0], d["center"][1] - ex["center"][1]) < 25 for ex in filtered):
-                        filtered.append(d)
-                with ai_lock:
-                    ai_results = filtered
+                    dets = filter_and_scale_dets(bx, cf)
+                    with ai_lock:
+                        ai_results = dets
             except Exception as e:
                 print(f"[AI WORKER] error: {e}")
                 
     worker_thread = threading.Thread(target=ai_worker, daemon=True)
     worker_thread.start()
     
-    # Instant initialization on first frame so initial combs show up immediately
+    # 100% recall initialization on frame 0 on full crisp frame
     disp0 = cv2.resize(sample_frame, (OUT_W, OUT_H))
     prev_gray = cv2.cvtColor(disp0, cv2.COLOR_BGR2GRAY)
     try:
-        init_res = model.predict(disp0, imgsz=512, conf=0.18, verbose=False)[0]
+        init_res = model.predict(sample_frame, imgsz=640, conf=0.08, verbose=False)[0]
         if init_res.boxes is not None:
-            ibx = init_res.boxes.xyxy.cpu().numpy()
-            icf = init_res.boxes.conf.cpu().numpy()
-            for b, c in zip(ibx, icf):
-                x1, y1, x2, y2 = map(float, b)
-                bw, bh = x2 - x1, y2 - y1
-                if y1 < OUT_H * 0.04 and bw > 140: continue
-                if bw < 8 or bh < 8 or bw > 140 or bh > 140: continue
-                cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            init_dets = filter_and_scale_dets(init_res.boxes.xyxy.cpu().numpy(), init_res.boxes.conf.cpu().numpy())
+            for d in init_dets:
                 hens[next_id] = {
-                    "box": [x1, y1, x2, y2],
-                    "center": (cx, cy),
+                    "box": d["box"],
+                    "center": d["center"],
                     "lost": 0,
                     "hits": 3
                 }
@@ -220,7 +240,7 @@ def _sync_generate_frames(video_source, ref_settings):
         while cap.isOpened():
             t_frame_start = time.time()
             
-            # Read every frame sequentially - NO DROPPED FRAMES for 100% silky smooth playback
+            # Read every frame sequentially for 100% smooth, continuous playback
             ret, frame = cap.read()
             if not ret:
                 if not is_live:
@@ -244,7 +264,7 @@ def _sync_generate_frames(video_source, ref_settings):
                 for hid in active_ids:
                     x1, y1, x2, y2 = hens[hid]["box"]
                     cx, cy = hens[hid]["center"]
-                    # 5 points per hen: center + 4 quadrant points inside the comb box
+                    # 5 points inside the comb box
                     quad_pts = [
                         (cx, cy),
                         (x1 * 0.7 + x2 * 0.3, y1 * 0.7 + y2 * 0.3),
@@ -301,7 +321,7 @@ def _sync_generate_frames(video_source, ref_settings):
                         if hid in used_hens: continue
                         hx, hy = hdata["center"]
                         d = math.hypot(cx - hx, cy - hy)
-                        if d < 60 and d < best_dist:
+                        if d < 55 and d < best_dist:
                             best_dist = d
                             best_id = hid
                             
@@ -334,11 +354,11 @@ def _sync_generate_frames(video_source, ref_settings):
                 if hens[hid]["lost"] > 18:
                     del hens[hid]
 
-            # 3. Submit next frame to AI worker periodically (every ~25 frames / 0.8s) so CPU remains free for smooth 30 FPS playback
+            # 3. Submit next frame to AI worker periodically (every ~25 frames / 0.8s)
             if frame_no - last_ai_frame_no >= 25:
                 with ai_lock:
                     if ai_frame is None and ai_results is None:
-                        ai_frame = display.copy()
+                        ai_frame = frame.copy()
                         last_ai_frame_no = frame_no
                         
             # 4. Counting & Drawing
