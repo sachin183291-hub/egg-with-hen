@@ -126,16 +126,16 @@ def _sync_generate_frames(video_source, ref_settings):
     
     if ref_settings:
         roi_x1 = 0
-        roi_y1 = int(frame_h * ref_settings.get('roi_y1_pct', 0.10))
+        roi_y1 = int(frame_h * ref_settings.get('roi_y1_pct', 0.08))
         roi_x2 = frame_w
-        roi_y2 = int(frame_h * ref_settings.get('roi_y2_pct', 0.88))
+        roi_y2 = int(frame_h * ref_settings.get('roi_y2_pct', 0.82))
         learned_conf = ref_settings.get('conf_threshold', 0.25)
         avg_ref_hens = ref_settings.get('avg_hen_count', 0)
     else:
         roi_x1 = 0
-        roi_y1 = int(frame_h * 0.10)
+        roi_y1 = int(frame_h * 0.08)
         roi_x2 = frame_w
-        roi_y2 = int(frame_h * 0.88)
+        roi_y2 = int(frame_h * 0.82)
         learned_conf = 0.25
         avg_ref_hens = 0
         
@@ -171,19 +171,23 @@ def _sync_generate_frames(video_source, ref_settings):
                 time.sleep(0.01)
                 continue
             try:
-                res = model.predict(f, verbose=False, conf=0.08, iou=0.45, imgsz=384)[0]
+                res = model.predict(f, verbose=False, conf=0.10, iou=0.45, imgsz=384)[0]
                 raw = []
                 if res.boxes is not None:
                     bx = res.boxes.xyxy.cpu().numpy()
                     cf = res.boxes.conf.cpu().numpy()
                     for b, c in zip(bx, cf):
-                        if c < 0.10: continue
+                        if c < 0.12: continue
                         x1, y1, x2, y2 = map(int, b)
                         w, h = x2 - x1, y2 - y1
-                        if w <= 8 or h <= 8 or w > 180 or h > 180: continue
+                        cx = (x1 + x2) / 2.0
+                        cy = (y1 + y2) / 2.0
+                        # STRICT ROI: Ignore anything outside detection zone or at bottom cage floor
+                        if cy < roi_y1 or cy > roi_y2 or y2 >= frame_h - 25: continue
+                        if w <= 10 or h <= 10 or w > 175 or h > 175: continue
                         raw.append({
                             "box": (x1, y1, x2, y2),
-                            "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+                            "center": (cx, cy),
                             "w": w, "h": h,
                             "conf": float(c)
                         })
@@ -203,17 +207,20 @@ def _sync_generate_frames(video_source, ref_settings):
     # Immediate initialization on frame 1 so initial combs are detected instantly
     sample_gray = cv2.cvtColor(sample_frame, cv2.COLOR_BGR2GRAY)
     try:
-        init_res = model.predict(sample_frame, verbose=False, conf=0.08, iou=0.45, imgsz=384)[0]
+        init_res = model.predict(sample_frame, verbose=False, conf=0.10, iou=0.45, imgsz=384)[0]
         if init_res.boxes is not None:
             ibx = init_res.boxes.xyxy.cpu().numpy()
             icf = init_res.boxes.conf.cpu().numpy()
             init_raw = []
             for b, c in zip(ibx, icf):
-                if c < 0.10: continue
+                if c < 0.12: continue
                 x1, y1, x2, y2 = map(int, b)
                 w, h = x2 - x1, y2 - y1
-                if w <= 8 or h <= 8 or w > 180 or h > 180: continue
-                init_raw.append({"box": (x1, y1, x2, y2), "center": ((x1+x2)/2.0, (y1+y2)/2.0), "conf": float(c)})
+                cx = (x1 + x2) / 2.0
+                cy = (y1 + y2) / 2.0
+                if cy < roi_y1 or cy > roi_y2 or y2 >= frame_h - 25: continue
+                if w <= 10 or h <= 10 or w > 175 or h > 175: continue
+                init_raw.append({"box": (x1, y1, x2, y2), "center": (cx, cy), "conf": float(c)})
             init_raw.sort(key=lambda d: d["conf"], reverse=True)
             for d in init_raw:
                 if not any(math.hypot(d["center"][0] - ex["center"][0], d["center"][1] - ex["center"][1]) < 40 for ex in hens.values()):
@@ -223,6 +230,7 @@ def _sync_generate_frames(video_source, ref_settings):
                         "box": d["box"],
                         "center": d["center"],
                         "lost": 0,
+                        "yolo_unseen": 0,
                         "hits": 2,
                         "template": crop
                     }
@@ -241,22 +249,37 @@ def _sync_generate_frames(video_source, ref_settings):
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     frame_no = 0
                     start_wall = time.time()
+                    # Clean reset on loop: prevents zombie boxes from accumulating at the bottom!
+                    hens.clear()
+                    next_num = 1
                     continue
                 break
                 
             frame_no += 1
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             
-            # 1. High-speed template tracking on every single frame (~3ms)
-            # Ensures bounding boxes glide smoothly and stay glued to moving hen combs
+            # 1. High-speed template tracking for active hen combs (~3ms)
             for hid, hdata in list(hens.items()):
-                if hdata["lost"] > 25: continue
+                hdata["yolo_unseen"] = hdata.get("yolo_unseen", 0) + 1
+                # If YOLO hasn't confirmed this track for > 20 frames (~0.7s), age it out
+                if hdata["yolo_unseen"] > 20:
+                    hdata["lost"] += 1
+                    if hdata["lost"] > 6:
+                        del hens[hid]
+                        continue
+
+                if hdata["lost"] > 10:
+                    del hens[hid]
+                    continue
+                    
                 x1, y1, x2, y2 = hdata["box"]
                 tw = x2 - x1
                 th = y2 - y1
-                if tw < 6 or th < 6: continue
+                if tw < 8 or th < 8:
+                    del hens[hid]
+                    continue
                 
-                pad = 28
+                pad = 24
                 sx1 = max(0, x1 - pad)
                 sy1 = max(0, y1 - pad)
                 sx2 = min(frame_w, x2 + pad)
@@ -270,15 +293,17 @@ def _sync_generate_frames(video_source, ref_settings):
                     
                 res_m = cv2.matchTemplate(region, templ, cv2.TM_CCOEFF_NORMED)
                 min_v, max_v, min_l, max_l = cv2.minMaxLoc(res_m)
-                if max_v >= 0.35:
+                if max_v >= 0.46:
                     nx1 = sx1 + max_l[0]
                     ny1 = sy1 + max_l[1]
-                    hdata["box"] = (nx1, ny1, nx1 + tw, ny1 + th)
-                    hdata["center"] = ((nx1 + nx1 + tw) / 2.0, (ny1 + ny1 + th) / 2.0)
-                    hdata["lost"] = 0
-                    new_crop = gray[ny1:ny1+th, nx1:nx1+tw]
-                    if new_crop.shape == templ.shape:
-                        hdata["template"] = cv2.addWeighted(templ, 0.85, new_crop, 0.15, 0)
+                    ncy = (ny1 + ny1 + th) / 2.0
+                    # Strictly ensure box stays within ROI zone; if it hit bottom floor, kill it!
+                    if roi_y1 <= ncy <= roi_y2 and (ny1 + th) < frame_h - 20:
+                        hdata["box"] = (nx1, ny1, nx1 + tw, ny1 + th)
+                        hdata["center"] = ((nx1 + nx1 + tw) / 2.0, ncy)
+                        hdata["lost"] = 0
+                    else:
+                        del hens[hid]
                 else:
                     hdata["lost"] += 1
 
@@ -295,10 +320,10 @@ def _sync_generate_frames(video_source, ref_settings):
                     cx, cy = det["center"]
                     best_id, best_dist = None, float("inf")
                     for hid, hdata in hens.items():
-                        if hid in used_hens or hdata["lost"] > 25: continue
+                        if hid in used_hens: continue
                         hx, hy = hdata["center"]
                         d = math.hypot(cx - hx, cy - hy)
-                        if d < 120 and d < best_dist:
+                        if d < 100 and d < best_dist:
                             best_dist = d
                             best_id = hid
                             
@@ -309,9 +334,10 @@ def _sync_generate_frames(video_source, ref_settings):
                         hens[best_id]["box"] = det["box"]
                         hens[best_id]["center"] = det["center"]
                         hens[best_id]["lost"] = 0
+                        hens[best_id]["yolo_unseen"] = 0
                         hens[best_id]["hits"] += 1
                         if crop.size > 0:
-                            hens[best_id]["template"] = crop
+                            hens[best_id]["template"] = crop # Refresh with clean YOLO comb crop
                         used_hens.add(best_id)
                     else:
                         hid = next_num
@@ -320,6 +346,7 @@ def _sync_generate_frames(video_source, ref_settings):
                             "box": det["box"],
                             "center": det["center"],
                             "lost": 0,
+                            "yolo_unseen": 0,
                             "hits": 1,
                             "template": crop
                         }
@@ -331,9 +358,9 @@ def _sync_generate_frames(video_source, ref_settings):
                     if ai_frame is None and ai_results is None:
                         ai_frame = frame.copy()
                         
-            # 4. Counting & Visibility
-            verified_hens = [n for n, d in hens.items() if d.get("hits", 0) >= 2]
-            visible_hens = [n for n, d in hens.items() if d["lost"] <= 5 and d.get("hits", 0) >= 1]
+            # 4. Counting & Visibility: Strictly inside the detection zone!
+            visible_hens = [n for n, d in hens.items() if d["lost"] <= 3 and d.get("hits", 0) >= 1 and roi_y1 <= d["center"][1] <= roi_y2]
+            verified_hens = [n for n, d in hens.items() if d.get("hits", 0) >= 2 and roi_y1 <= d["center"][1] <= roi_y2]
             total_counted = max(len(verified_hens), len(visible_hens))
             current_total_count = total_counted
             visible_in_zone = len(visible_hens)
