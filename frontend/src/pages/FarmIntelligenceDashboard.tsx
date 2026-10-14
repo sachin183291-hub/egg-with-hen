@@ -128,42 +128,52 @@ export default function FarmIntelligenceDashboard() {
     setTimeout(() => setRefreshing(false), 500)
   }
 
+  const revPerEgg = Number(kpi.revenue_per_egg || 6.50)
+  const costPerEgg = Number(kpi.cost_per_egg || 4.80)
+  const spreadMargin = Math.max(0, revPerEgg - costPerEgg).toFixed(2)
+
+  // Format currency cleanly without trailing .00 on high-level KPI cards
+  const formatCurrency = (val: number | undefined, defaultVal: number) => {
+    const num = Math.round(Number(val ?? defaultVal))
+    return `₹${num.toLocaleString('en-IN')}`
+  }
+
   const statCards = [
     {
       label: 'Active Flock Size',
       value: (kpi.total_hens || 16850).toLocaleString(),
       icon: Activity,
       color: '#3B82F6',
-      sub: `Unique Tracked: ${(kpi.unique_hens || kpi.total_hens || 16850).toLocaleString()}`,
+      sub: `Unique Tracked: ${(kpi.unique_hens || kpi.total_hens || 16850).toLocaleString()} birds`,
       badge: '+2.4% MoM'
     },
     {
       label: 'Cumulative Egg Yield',
-      value: (kpi.total_eggs || kpi.total_eggs_produced || 412850).toLocaleString(),
+      value: (kpi.total_eggs || kpi.total_eggs_produced || 449050).toLocaleString(),
       icon: Egg,
       color: '#F59E0B',
-      sub: `Daily Average: ${(kpi.avg_daily_eggs || 13760).toLocaleString()} eggs/day`,
+      sub: `Daily Average: ${(kpi.avg_daily_eggs || 14970).toLocaleString()} eggs/day`,
       badge: '91.6% Laying'
     },
     {
       label: 'Operating Revenue',
-      value: `₹${Number(kpi.total_revenue || 2684500).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: formatCurrency(kpi.total_revenue, 2684500),
       icon: IndianRupee,
       color: '#10B981',
-      sub: `Avg ₹${Number(kpi.revenue_per_egg || 6.50).toFixed(2)} / egg`,
+      sub: `Avg ₹${revPerEgg.toFixed(2)} / egg`,
       badge: '+8.2%'
     },
     {
       label: 'Operating Expenses',
-      value: `₹${Number(kpi.total_expenses || 1462100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: formatCurrency(kpi.total_expenses, 1462100),
       icon: TrendingUp,
       color: '#EF4444',
-      sub: 'Feed, Energy, Payroll & Health',
+      sub: 'Feed, Energy, Wages & Care',
       badge: 'Controlled'
     },
     {
       label: 'Net Farm Margin',
-      value: `₹${Number(kpi.net_profit || 1222400).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: formatCurrency(kpi.net_profit, 1222400),
       icon: IndianRupee,
       color: '#10B981',
       sub: '47.1% Net Operating Margin',
@@ -171,10 +181,10 @@ export default function FarmIntelligenceDashboard() {
     },
     {
       label: 'Production Cost / Egg',
-      value: `₹${Number(kpi.cost_per_egg || 4.80).toFixed(2)}`,
+      value: `₹${costPerEgg.toFixed(2)}`,
       icon: Zap,
       color: '#8B5CF6',
-      sub: 'Spread: +₹1.70 margin',
+      sub: `Spread: +₹${spreadMargin} / egg margin`,
       badge: 'Optimal FCR'
     },
     {
@@ -247,55 +257,111 @@ export default function FarmIntelligenceDashboard() {
         </div>
       </div>
 
-      {/* KPI Stat Cards Grid */}
-      <div className="stat-grid" style={{ marginBottom: 32 }}>
+      {/* KPI Stat Cards Grid - Responsive Balanced 4-Column Grid */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+        gap: '16px',
+        marginBottom: '28px'
+      }}>
         {statCards.map((card) => (
           <div
             key={card.label}
-            className="stat-card"
             style={{
-              '--stat-color': card.color,
-              background: 'var(--bg-card)',
-              borderRadius: 12,
-              padding: '20px',
+              background: 'rgba(255, 255, 255, 0.96)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              borderRadius: '14px',
+              padding: '18px 20px',
               border: '1px solid var(--border-color)',
-              boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
-              position: 'relative'
-            } as React.CSSProperties}
+              boxShadow: '0 4px 14px rgba(0, 0, 0, 0.05)',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              minWidth: 0,
+              overflow: 'hidden'
+            }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-              <div className="stat-icon" style={{
+            {/* Top color indicator accent */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '3px',
+              background: card.color,
+              opacity: 0.9
+            }} />
+
+            {/* Top row: Icon on left, Badge on right */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '14px',
+              width: '100%'
+            }}>
+              <div style={{
                 background: `${card.color}15`,
                 color: card.color,
-                width: 38,
-                height: 38,
+                width: 42,
+                height: 42,
                 borderRadius: 10,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center'
               }}>
-                <card.icon size={20} color={card.color} />
+                <card.icon size={22} color={card.color} />
               </div>
               <span style={{
-                fontSize: '0.72rem',
+                fontSize: '0.74rem',
                 fontWeight: 700,
                 color: card.color,
                 background: `${card.color}15`,
-                padding: '2px 8px',
-                borderRadius: 10
+                padding: '3px 10px',
+                borderRadius: 20,
+                border: `1px solid ${card.color}30`,
+                letterSpacing: '0.2px',
+                whiteSpace: 'nowrap'
               }}>
                 {card.badge}
               </span>
             </div>
 
-            <div>
-              <div className="stat-value" style={{ fontSize: '1.65rem', fontWeight: 700, margin: '4px 0', color: 'var(--text-primary)' }}>
+            {/* Bottom Content: Value, Label, and Subtitle */}
+            <div style={{ minWidth: 0, width: '100%' }}>
+              <div style={{
+                fontSize: '1.65rem',
+                fontWeight: 800,
+                color: 'var(--text-primary)',
+                lineHeight: 1.2,
+                margin: '2px 0 6px 0',
+                letterSpacing: '-0.5px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }} title={card.value}>
                 {card.value}
               </div>
-              <div className="stat-label" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
+              <div style={{
+                fontSize: '0.85rem',
+                color: 'var(--text-secondary)',
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}>
                 {card.label}
               </div>
-              <div className="stat-change" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+              <div style={{
+                fontSize: '0.78rem',
+                color: 'var(--text-muted, #64748B)',
+                marginTop: '4px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}>
                 {card.sub}
               </div>
             </div>

@@ -85,7 +85,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
             if (filteredItems.length === 0) return null
             return (
               <div key={group.group}>
-                <div className="sidebar-section-label">{t(`sidebar.groups.${group.group}`)}</div>
+                <div className="sidebar-section-label">{t(`sidebar.groups.${group.group}`, group.group)}</div>
                 {filteredItems.map(item => (
                   <NavLink
                     key={item.to}
@@ -95,7 +95,7 @@ export default function Sidebar({ isOpen, onClose }: { isOpen?: boolean, onClose
                     className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
                   >
                     <item.icon size={16} className="nav-icon" />
-                    {t(`sidebar.items.${item.label}`)}
+                    {t(`sidebar.items.${item.label}`, item.label)}
                   </NavLink>
                 ))}
               </div>
