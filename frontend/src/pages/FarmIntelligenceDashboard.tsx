@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { farmApi } from '../api/farmApi'
 import {
-  TrendingUp, Activity, DollarSign, AlertTriangle, 
+  TrendingUp, Activity, IndianRupee, AlertTriangle, 
   Thermometer, Egg, Calendar, Zap, Sparkles, CheckCircle2,
   BarChart3, ArrowUpRight, ShieldCheck, RefreshCw
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-// Enterprise realistic mock dataset for Farm BI
+// Enterprise realistic mock dataset for Farm BI (in Indian Rupees ₹)
 const MOCK_BI_KPI = {
   total_hens: 16850,
   unique_hens: 16850,
@@ -19,11 +19,11 @@ const MOCK_BI_KPI = {
   average_temperature: 24.2,
   active_alerts: 2,
   critical_alerts: 1,
-  total_revenue: 68450.0,
-  total_expenses: 36210.0,
-  net_profit: 32240.0,
-  cost_per_egg: 0.088,
-  revenue_per_egg: 0.166,
+  total_revenue: 2684500.0,
+  total_expenses: 1462100.0,
+  net_profit: 1222400.0,
+  cost_per_egg: 4.80,
+  revenue_per_egg: 6.50,
   fcr_ratio: "1.82 kg/dz",
   laying_efficiency: "91.6%",
   flock_health_index: "98.4%"
@@ -41,11 +41,11 @@ const MOCK_PRODUCTION_TREND = [
 ]
 
 const MOCK_FORECASTS = [
-  { target_date: "Tomorrow", predicted_value: 13980, confidence_lower: 13700, confidence_upper: 14250, revenue: 2315 },
-  { target_date: "Day +2", predicted_value: 14050, confidence_lower: 13750, confidence_upper: 14320, revenue: 2330 },
-  { target_date: "Day +3", predicted_value: 14120, confidence_lower: 13800, confidence_upper: 14400, revenue: 2345 },
-  { target_date: "Day +4", predicted_value: 14180, confidence_lower: 13850, confidence_upper: 14460, revenue: 2355 },
-  { target_date: "Day +5", predicted_value: 14240, confidence_lower: 13900, confidence_upper: 14530, revenue: 2365 }
+  { target_date: "Tomorrow", predicted_value: 13980, confidence_lower: 13700, confidence_upper: 14250, revenue: 90870 },
+  { target_date: "Day +2", predicted_value: 14050, confidence_lower: 13750, confidence_upper: 14320, revenue: 91325 },
+  { target_date: "Day +3", predicted_value: 14120, confidence_lower: 13800, confidence_upper: 14400, revenue: 91780 },
+  { target_date: "Day +4", predicted_value: 14180, confidence_lower: 13850, confidence_upper: 14460, revenue: 92170 },
+  { target_date: "Day +5", predicted_value: 14240, confidence_lower: 13900, confidence_upper: 14530, revenue: 92560 }
 ]
 
 const MOCK_ZONE_BREAKDOWN = [
@@ -106,7 +106,7 @@ export default function FarmIntelligenceDashboard() {
           predicted_value: Math.round(f.predicted_value),
           confidence_lower: Math.round(f.confidence_lower || f.predicted_value * 0.96),
           confidence_upper: Math.round(f.confidence_upper || f.predicted_value * 1.04),
-          revenue: Math.round(f.predicted_value * 0.17)
+          revenue: Math.round(f.predicted_value * 6.50)
         }))
         setForecasts(fList)
       } else {
@@ -147,15 +147,15 @@ export default function FarmIntelligenceDashboard() {
     },
     {
       label: 'Operating Revenue',
-      value: `$${Number(kpi.total_revenue || 68450).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      icon: DollarSign,
+      value: `₹${Number(kpi.total_revenue || 2684500).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      icon: IndianRupee,
       color: '#10B981',
-      sub: `Avg $${Number(kpi.revenue_per_egg || 0.17).toFixed(3)} / egg`,
+      sub: `Avg ₹${Number(kpi.revenue_per_egg || 6.50).toFixed(2)} / egg`,
       badge: '+8.2%'
     },
     {
       label: 'Operating Expenses',
-      value: `$${Number(kpi.total_expenses || 36210).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: `₹${Number(kpi.total_expenses || 1462100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       icon: TrendingUp,
       color: '#EF4444',
       sub: 'Feed, Energy, Payroll & Health',
@@ -163,18 +163,18 @@ export default function FarmIntelligenceDashboard() {
     },
     {
       label: 'Net Farm Margin',
-      value: `$${Number(kpi.net_profit || 32240).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      icon: DollarSign,
+      value: `₹${Number(kpi.net_profit || 1222400).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      icon: IndianRupee,
       color: '#10B981',
       sub: '47.1% Net Operating Margin',
       badge: 'Profitable'
     },
     {
       label: 'Production Cost / Egg',
-      value: `$${Number(kpi.cost_per_egg || 0.088).toFixed(3)}`,
+      value: `₹${Number(kpi.cost_per_egg || 4.80).toFixed(2)}`,
       icon: Zap,
       color: '#8B5CF6',
-      sub: 'Spread: +$0.078 margin',
+      sub: 'Spread: +₹1.70 margin',
       badge: 'Optimal FCR'
     },
     {
@@ -433,7 +433,7 @@ export default function FarmIntelligenceDashboard() {
                     {f.predicted_value.toLocaleString()} Eggs
                   </div>
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                    Est. Rev: ${f.revenue.toLocaleString()}
+                    Est. Rev: ₹{Number(f.revenue).toLocaleString('en-IN')}
                   </span>
                 </div>
               </div>

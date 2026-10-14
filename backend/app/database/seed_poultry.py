@@ -131,30 +131,30 @@ def seed_poultry_data(force: bool = True):
                     recorded_at=d
                 ))
 
-            # ─── Financial Records (Daily distribution) ───────────────────────────────
-            # Revenue items
-            daily_table_eggs_rev = random.uniform(1850.0, 2300.0)
-            daily_premium_rev = random.uniform(400.0, 650.0)
+            # ─── Financial Records (Daily distribution in INR ₹) ───────────────────────────────
+            # Revenue items (in INR)
+            daily_table_eggs_rev = random.uniform(82000.0, 95000.0)
+            daily_premium_rev = random.uniform(18000.0, 26000.0)
             db.add(FinancialRecord(date=d, type="REVENUE", category="Table Egg Commercial Sales", amount=round(daily_table_eggs_rev, 2), description="Direct distributor dispatch", farm_id=farm1.id, created_by=admin_id))
             db.add(FinancialRecord(date=d, type="REVENUE", category="Grade-AA Jumbo Egg Sales", amount=round(daily_premium_rev, 2), description="Premium supermarket batch", farm_id=farm1.id, created_by=admin_id))
 
             if i % 5 == 0:
-                db.add(FinancialRecord(date=d, type="REVENUE", category="Organic Compost Fertilizer", amount=round(random.uniform(350.0, 520.0), 2), description="Processed poultry manure to organic tea estates", farm_id=farm1.id, created_by=admin_id))
+                db.add(FinancialRecord(date=d, type="REVENUE", category="Organic Compost Fertilizer", amount=round(random.uniform(8500.0, 14200.0), 2), description="Processed poultry manure to organic tea estates", farm_id=farm1.id, created_by=admin_id))
 
             if i % 14 == 0:
-                db.add(FinancialRecord(date=d, type="REVENUE", category="Spent Hen Cull Processing", amount=round(random.uniform(1200.0, 1600.0), 2), description="End-of-cycle flock rotation", farm_id=farm2.id, created_by=admin_id))
+                db.add(FinancialRecord(date=d, type="REVENUE", category="Spent Hen Cull Processing", amount=round(random.uniform(32000.0, 48000.0), 2), description="End-of-cycle flock rotation", farm_id=farm2.id, created_by=admin_id))
 
-            # Expense items
-            daily_feed_exp = random.uniform(950.0, 1180.0)
-            daily_power_exp = random.uniform(180.0, 260.0)
+            # Expense items (in INR)
+            daily_feed_exp = random.uniform(42000.0, 52000.0)
+            daily_power_exp = random.uniform(8000.0, 12000.0)
             db.add(FinancialRecord(date=d, type="EXPENSE", category="Organic Layer Feed Mash", amount=round(daily_feed_exp, 2), description="Soya & Maize fortified diet batch", farm_id=farm1.id, created_by=admin_id))
             db.add(FinancialRecord(date=d, type="EXPENSE", category="Electricity & Automated Conveyors", amount=round(daily_power_exp, 2), description="Power grid & generator backup", farm_id=farm1.id, created_by=admin_id))
 
             if i % 3 == 0:
-                db.add(FinancialRecord(date=d, type="EXPENSE", category="Biosecurity & Veterinary Care", amount=round(random.uniform(180.0, 320.0), 2), description="Electrolyte supplements & water sanitizers", farm_id=farm1.id, created_by=admin_id))
+                db.add(FinancialRecord(date=d, type="EXPENSE", category="Biosecurity & Veterinary Care", amount=round(random.uniform(5500.0, 9500.0), 2), description="Electrolyte supplements & water sanitizers", farm_id=farm1.id, created_by=admin_id))
             if i % 7 == 0:
-                db.add(FinancialRecord(date=d, type="EXPENSE", category="Labor & Farm Technician Wages", amount=round(random.uniform(800.0, 950.0), 2), description="Weekly shift payroll", farm_id=farm1.id, created_by=admin_id))
-                db.add(FinancialRecord(date=d, type="EXPENSE", category="Packaging & Egg Trays", amount=round(random.uniform(220.0, 380.0), 2), description="Biodegradable pulp molded trays", farm_id=farm1.id, created_by=admin_id))
+                db.add(FinancialRecord(date=d, type="EXPENSE", category="Labor & Farm Technician Wages", amount=round(random.uniform(28000.0, 36000.0), 2), description="Weekly shift payroll", farm_id=farm1.id, created_by=admin_id))
+                db.add(FinancialRecord(date=d, type="EXPENSE", category="Packaging & Egg Trays", amount=round(random.uniform(8000.0, 14000.0), 2), description="Biodegradable pulp molded trays", farm_id=farm1.id, created_by=admin_id))
 
             # Attendance
             if admin_id:
@@ -304,7 +304,7 @@ def seed_poultry_data(force: bool = True):
                 created_at=now
             ))
             
-            predicted_rev = round(predicted_eggs * 0.182, 2)
+            predicted_rev = round(predicted_eggs * 6.50, 2)
             db.add(Forecast(
                 metric_type="REVENUE",
                 target_date=target_d,

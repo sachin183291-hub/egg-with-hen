@@ -123,8 +123,8 @@ async def get_bi_kpis(days: int = Query(30, ge=1, le=365), db: Session = Depends
         "total_revenue": rev,
         "total_expenses": exp,
         "net_profit": rev - exp,
-        "cost_per_egg": round(exp / total_eggs, 2) if total_eggs > 0 else 0.08,
-        "revenue_per_egg": round(rev / eggs_sold, 2) if eggs_sold > 0 else 0.16
+        "cost_per_egg": round(exp / total_eggs, 2) if total_eggs > 0 else 4.80,
+        "revenue_per_egg": round(rev / eggs_sold, 2) if eggs_sold > 0 else 6.50
     }
 
 # ─── 3.3 Production Analysis ──────────────────────────────────────────────────

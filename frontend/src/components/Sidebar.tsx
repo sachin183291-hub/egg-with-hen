@@ -5,7 +5,7 @@ import { getInitials } from '../utils/helpers'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Map, Image, Users, Cpu, Blocks,
-  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse, Thermometer, Plane, Layers, AlertTriangle, DollarSign
+  ClipboardList, BarChart2, Settings, Shield, Smartphone, LogOut, CheckSquare, MessageCircle, Globe, HeartPulse, Thermometer, Plane, Layers, AlertTriangle, IndianRupee
 } from 'lucide-react'
 
 const navItems = [
@@ -13,7 +13,7 @@ const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/digital-twin', label: 'Digital Twin', icon: Layers },
     { to: '/farm-intelligence', label: 'Farm BI', icon: BarChart2 },
-    { to: '/financial-analytics', label: 'Finance', icon: DollarSign },
+    { to: '/financial-analytics', label: 'Finance', icon: IndianRupee },
     { to: '/action-center', label: 'Action Center', icon: AlertTriangle },
     { to: '/map', label: 'GIS Map', icon: Map, hideFromRestricted: true },
     { to: '/evidence', label: 'Evidence', icon: Image },

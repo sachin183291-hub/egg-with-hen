@@ -1,34 +1,34 @@
 import { useState, useEffect } from 'react'
 import { farmApi } from '../api/farmApi'
 import {
-  PlusCircle, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight,
+  PlusCircle, TrendingUp, IndianRupee, ArrowUpRight, ArrowDownRight,
   Receipt, Wallet, PieChart, FileText, CheckCircle2, RefreshCw, X
 } from 'lucide-react'
 
-// Realistic 30-day corporate poultry finance mock data
+// Realistic 30-day corporate poultry finance mock data (in Indian Rupees ₹)
 const MOCK_REVENUE = [
-  { category: "Table Egg Commercial Sales", amount: 46800.0, pct: 68.4, desc: "Direct distribution to regional retail chains" },
-  { category: "Grade-AA Jumbo Egg Sales", amount: 13200.0, pct: 19.3, desc: "Premium supermarket export contracts" },
-  { category: "Organic Compost Fertilizer", amount: 4850.0, pct: 7.1, desc: "Processed manure dispatch to Nilgiris tea estates" },
-  { category: "Spent Hen Cull Processing", amount: 3600.0, pct: 5.2, desc: "End-of-cycle flock rotation contracts" }
+  { category: "Table Egg Commercial Sales", amount: 384000.0, pct: 67.4, desc: "Direct distribution to regional retail chains" },
+  { category: "Grade-AA Jumbo Egg Sales", amount: 112000.0, pct: 19.6, desc: "Premium supermarket export contracts" },
+  { category: "Organic Compost Fertilizer", amount: 42500.0, pct: 7.5, desc: "Processed manure dispatch to Nilgiris tea estates" },
+  { category: "Spent Hen Cull Processing", amount: 31500.0, pct: 5.5, desc: "End-of-cycle flock rotation contracts" }
 ]
 
 const MOCK_EXPENSES = [
-  { category: "Organic Layer Feed Mash", amount: 18800.0, pct: 51.9, desc: "Fortified maize, soya meal & calcium mix" },
-  { category: "Labor & Technician Payroll", amount: 8200.0, pct: 22.6, desc: "Shift technicians, biosecurity & packing team" },
-  { category: "Electricity & Conveyor Power", amount: 4650.0, pct: 12.8, desc: "Tunnel ventilation fans & continuous belts" },
-  { category: "Biosecurity & Veterinary Care", amount: 2660.0, pct: 7.3, desc: "Vaccinations, water sanitizers & electrolytes" },
-  { category: "Packaging & Pulp Trays", amount: 1900.0, pct: 5.4, desc: "Recycled biodegradable egg trays" }
+  { category: "Organic Layer Feed Mash", amount: 158000.0, pct: 50.3, desc: "Fortified maize, soya meal & calcium mix" },
+  { category: "Labor & Technician Payroll", amount: 72000.0, pct: 22.9, desc: "Shift technicians, biosecurity & packing team" },
+  { category: "Electricity & Conveyor Power", amount: 41500.0, pct: 13.2, desc: "Tunnel ventilation fans & continuous belts" },
+  { category: "Biosecurity & Veterinary Care", amount: 24600.0, pct: 7.8, desc: "Vaccinations, water sanitizers & electrolytes" },
+  { category: "Packaging & Pulp Trays", amount: 18000.0, pct: 5.8, desc: "Recycled biodegradable egg trays" }
 ]
 
 const MOCK_LEDGER_TRANSACTIONS = [
-  { id: "TXN-01", date: "2026-10-14 16:30", type: "REVENUE", category: "Table Egg Commercial Sales", amount: 2450.00, desc: "Dispatch Batch #NMK-8821 (30,000 Eggs)", status: "SETTLED" },
-  { id: "TXN-02", date: "2026-10-14 14:15", type: "EXPENSE", category: "Organic Layer Feed Mash", amount: 1240.00, desc: "Maize mash delivery 4.5 MT (Coimbatore Feed Mills)", status: "SETTLED" },
-  { id: "TXN-03", date: "2026-10-13 11:20", type: "REVENUE", category: "Grade-AA Jumbo Egg Sales", amount: 620.00, desc: "Premium Hypermarket Batch #HYP-310", status: "SETTLED" },
-  { id: "TXN-04", date: "2026-10-13 09:45", type: "EXPENSE", category: "Electricity & Conveyor Power", amount: 310.00, desc: "Grid backup generator diesel fuel top-up", status: "SETTLED" },
-  { id: "TXN-05", date: "2026-10-12 17:00", type: "REVENUE", category: "Organic Compost Fertilizer", amount: 480.00, desc: "Tea estate manure consignment #TE-90", status: "SETTLED" },
-  { id: "TXN-06", date: "2026-10-12 10:30", type: "EXPENSE", category: "Biosecurity & Veterinary Care", amount: 280.00, desc: "Zone 1-4 water line sanitation acidifier pack", status: "SETTLED" },
-  { id: "TXN-07", date: "2026-10-11 15:40", type: "REVENUE", category: "Table Egg Commercial Sales", amount: 2180.00, desc: "City wholesale market consignment #WM-144", status: "SETTLED" }
+  { id: "TXN-01", date: "2026-10-14 16:30", type: "REVENUE", category: "Table Egg Commercial Sales", amount: 24500.00, desc: "Dispatch Batch #NMK-8821 (30,000 Eggs)", status: "SETTLED" },
+  { id: "TXN-02", date: "2026-10-14 14:15", type: "EXPENSE", category: "Organic Layer Feed Mash", amount: 12400.00, desc: "Maize mash delivery 4.5 MT (Coimbatore Feed Mills)", status: "SETTLED" },
+  { id: "TXN-03", date: "2026-10-13 11:20", type: "REVENUE", category: "Grade-AA Jumbo Egg Sales", amount: 6200.00, desc: "Premium Hypermarket Batch #HYP-310", status: "SETTLED" },
+  { id: "TXN-04", date: "2026-10-13 09:45", type: "EXPENSE", category: "Electricity & Conveyor Power", amount: 3100.00, desc: "Grid backup generator diesel fuel top-up", status: "SETTLED" },
+  { id: "TXN-05", date: "2026-10-12 17:00", type: "REVENUE", category: "Organic Compost Fertilizer", amount: 4800.00, desc: "Tea estate manure consignment #TE-90", status: "SETTLED" },
+  { id: "TXN-06", date: "2026-10-12 10:30", type: "EXPENSE", category: "Biosecurity & Veterinary Care", amount: 2800.00, desc: "Zone 1-4 water line sanitation acidifier pack", status: "SETTLED" },
+  { id: "TXN-07", date: "2026-10-11 15:40", type: "REVENUE", category: "Table Egg Commercial Sales", amount: 21800.00, desc: "City wholesale market consignment #WM-144", status: "SETTLED" }
 ]
 
 export default function FinancialAnalyticsPage() {
@@ -211,7 +211,7 @@ export default function FinancialAnalyticsPage() {
             <ArrowUpRight size={18} color="#10B981" />
           </div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '6px 0 2px 0', color: '#10B981' }}>
-            ${totalRev.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₹{totalRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div style={{ fontSize: '0.78rem', color: '#10B981', display: 'flex', alignItems: 'center', gap: 4 }}>
             <span>&uarr; +8.4%</span> vs prior 30-day cycle
@@ -224,7 +224,7 @@ export default function FinancialAnalyticsPage() {
             <ArrowDownRight size={18} color="#EF4444" />
           </div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '6px 0 2px 0', color: '#EF4444' }}>
-            ${totalExp.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₹{totalExp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
             Feed, power, wages & health maintenance
@@ -237,7 +237,7 @@ export default function FinancialAnalyticsPage() {
             <Wallet size={18} color={netProfit >= 0 ? '#10B981' : '#EF4444'} />
           </div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '6px 0 2px 0', color: netProfit >= 0 ? '#10B981' : '#EF4444' }}>
-            ${netProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₹{netProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div style={{ fontSize: '0.78rem', color: '#10B981', fontWeight: 600 }}>
             {profitMargin}% Net Operating Margin
@@ -247,13 +247,13 @@ export default function FinancialAnalyticsPage() {
         <div style={{ background: 'var(--bg-card)', padding: '20px', borderRadius: 12, border: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 600 }}>
             <span>UNIT REALIZATION</span>
-            <DollarSign size={18} color="#3B82F6" />
+            <IndianRupee size={18} color="#3B82F6" />
           </div>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--text-primary)' }}>
-            +$0.078
+            +₹1.70
           </div>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-            Cost: $0.088 / Egg &bull; Rev: $0.166 / Egg
+            Cost: ₹4.80 / Egg &bull; Rev: ₹6.50 / Egg
           </div>
         </div>
       </div>
@@ -300,7 +300,7 @@ export default function FinancialAnalyticsPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Amount ($ USD)</label>
+              <label style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Amount (₹ INR)</label>
               <input
                 type="number"
                 step="0.01"
@@ -349,7 +349,7 @@ export default function FinancialAnalyticsPage() {
               Revenue Streams (30 Days)
             </h2>
             <span style={{ fontSize: '1rem', fontWeight: 700, color: '#10B981' }}>
-              ${totalRev.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{totalRev.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
@@ -366,7 +366,7 @@ export default function FinancialAnalyticsPage() {
                       <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>{r.desc || 'Commercial poultry income batch'}</div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700, color: '#10B981' }}>${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      <div style={{ fontWeight: 700, color: '#10B981' }}>₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{pct}% of rev</span>
                     </div>
                   </div>
@@ -394,7 +394,7 @@ export default function FinancialAnalyticsPage() {
               Expense Breakdown (30 Days)
             </h2>
             <span style={{ fontSize: '1rem', fontWeight: 700, color: '#EF4444' }}>
-              ${totalExp.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₹{totalExp.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
@@ -411,7 +411,7 @@ export default function FinancialAnalyticsPage() {
                       <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>{e.desc || 'Operational farm expenditure'}</div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700, color: '#EF4444' }}>${amt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                      <div style={{ fontWeight: 700, color: '#EF4444' }}>₹{amt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                       <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{pct}% of cost</span>
                     </div>
                   </div>
@@ -486,7 +486,7 @@ export default function FinancialAnalyticsPage() {
                     fontWeight: 700,
                     color: tx.type === 'REVENUE' ? '#10B981' : '#EF4444'
                   }}>
-                    {tx.type === 'REVENUE' ? '+' : '-'}${Number(tx.amount).toFixed(2)}
+                    {tx.type === 'REVENUE' ? '+' : '-'}₹{Number(tx.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td style={{ padding: '10px 14px', textAlign: 'right' }}>
                     <span style={{
