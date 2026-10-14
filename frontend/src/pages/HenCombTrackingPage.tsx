@@ -84,10 +84,10 @@ export default function HenCombTrackingPage() {
 
   return (
     <div style={{ maxWidth: 1000, margin: '0 auto', padding: '20px' }}>
-      <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 8, color: '#f8fafc', textAlign: 'center' }}>
+      <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 8, color: 'var(--text-primary, #1e293b)', textAlign: 'center' }}>
         Live AI Streaming
       </h2>
-      <p style={{ color: '#94a3b8', textAlign: 'center', marginBottom: 40, fontSize: '1.05rem' }}>
+      <p style={{ color: 'var(--text-secondary, #475569)', textAlign: 'center', marginBottom: 40, fontSize: '1.05rem' }}>
         Upload a video for ultra-smooth AI tracking at normal speed
       </p>
 
@@ -99,7 +99,7 @@ export default function HenCombTrackingPage() {
 
       {!streamUrl ? (
         <div className="card" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: 30, color: '#f8fafc' }}>Select Stream Source</h3>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: 30, color: 'var(--text-primary, #1e293b)' }}>Select Stream Source</h3>
           
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 20, width: '100%', maxWidth: 850 }}>
             <div 
@@ -114,8 +114,8 @@ export default function HenCombTrackingPage() {
                 <FileVideo size={28} color="white" />
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>Farm Hen Video</div>
-                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: 4 }}>Instant 30 FPS tracking on demo video</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary, #1e293b)' }}>Farm Hen Video</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #475569)', marginTop: 4 }}>Instant 30 FPS tracking on demo video</div>
               </div>
             </div>
 
@@ -128,10 +128,10 @@ export default function HenCombTrackingPage() {
                 {isProcessing ? <RefreshCw className="animate-spin" size={28} color="white" /> : <Upload size={28} color="white" />}
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary, #1e293b)' }}>
                   {isProcessing ? 'Processing Video...' : 'Upload Video'}
                 </div>
-                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: 4 }}>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #475569)', marginTop: 4 }}>
                   {isProcessing ? 'Streaming at normal speed' : 'Upload custom farm video file'}
                 </div>
               </div>
@@ -147,8 +147,8 @@ export default function HenCombTrackingPage() {
                 <Camera size={28} color="white" />
               </div>
               <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc' }}>Live Camera</div>
-                <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: 4 }}>Real-time streaming via webcam</div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary, #1e293b)' }}>Live Camera</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #475569)', marginTop: 4 }}>Real-time streaming via webcam</div>
               </div>
             </div>
           </div>

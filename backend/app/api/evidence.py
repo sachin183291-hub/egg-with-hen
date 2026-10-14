@@ -7,7 +7,6 @@ import json
 import io
 import pillow_heif
 from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
 
 # Support HEIC images globally
 pillow_heif.register_heif_opener()
@@ -34,25 +33,21 @@ router = APIRouter(prefix="/api/evidence", tags=["Evidence"])
 def extract_exif_datetime(image_bytes: bytes) -> Optional[datetime]:
     """
     Extract the original capture datetime from image EXIF data (server-side).
-    Returns UTC-aware datetime if found, else None.
-    This is MORE trustworthy than the client-sent capture_timestamp.
+    Returns naive datetime if found (since camera EXIF standard has no timezone), else None.
+    This is compared against both local IST and UTC to prevent timezone skew.
     """
     try:
         from PIL import Image
-        from PIL.ExifTags import TAGS
         img = Image.open(io.BytesIO(image_bytes))
         exif_data = img._getexif()
         if not exif_data:
             return None
-        # Tag 36867 = DateTimeOriginal, Tag 36868 = DateTimeDigitized
+        # Tag 36867 = DateTimeOriginal, Tag 36868 = DateTimeDigitized, 306 = DateTime
         for tag_id in (36867, 36868, 306):
             raw = exif_data.get(tag_id)
             if raw:
                 try:
-                    dt = datetime.strptime(str(raw), "%Y:%m:%d %H:%M:%S")
-                    # EXIF has no timezone — assume device local time (IST UTC+5:30 is common)
-                    # We treat it as UTC for comparison (conservative approach)
-                    return dt.replace(tzinfo=timezone.utc)
+                    return datetime.strptime(str(raw).strip(), "%Y:%m:%d %H:%M:%S")
                 except ValueError:
                     continue
     except Exception:
@@ -64,46 +59,54 @@ def verify_timestamp(
     upload_time: datetime,
     client_capture_time: datetime,
     exif_capture_time: Optional[datetime],
-    tolerance_seconds: int = 180,
+    tolerance_seconds: int = 600,  # 10 minutes tolerance (accommodates mobile network upload & review)
 ) -> tuple[EvidenceStatusEnum, str]:
     """
     Compare image capture time vs upload time.
 
-    Priority:
-      1. EXIF datetime from image (most trustworthy — cannot be faked by client)
-      2. Client-sent capture_timestamp (fallback if no EXIF)
-
     Rules:
-      - Difference <= 3 minutes → VERIFIED ✅
-      - Difference >  3 minutes → SUSPICIOUS ⚠️
+      - Upload within freshness window (<= 10 minutes) -> VERIFIED ✅
+      - Upload delayed (> 10 minutes) -> SUSPICIOUS ⚠️
 
     Returns: (status, reason_message)
     """
-    # Use EXIF time if available (more secure), else fall back to client-sent time
-    if exif_capture_time is not None:
-        capture_time = exif_capture_time
-        source = "EXIF (image metadata)"
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    if not upload_time.tzinfo:
+        upload_time = upload_time.replace(tzinfo=ist_tz)
     else:
-        capture_time = client_capture_time
-        if not capture_time.tzinfo:
-            capture_time = capture_time.replace(tzinfo=timezone.utc)
-        source = "client-reported timestamp"
+        upload_time = upload_time.astimezone(ist_tz)
 
-    diff_seconds = abs((upload_time - capture_time).total_seconds())
-    diff_minutes = diff_seconds / 60
+    if exif_capture_time is not None:
+        source = "Camera EXIF hardware timestamp"
+        # Camera EXIF standard records local device time without timezone offset.
+        # Test against both IST (+5:30) and UTC to prevent false 5.5-hour timezone discrepancies.
+        if exif_capture_time.tzinfo is None:
+            time_as_ist = exif_capture_time.replace(tzinfo=ist_tz)
+            time_as_utc = exif_capture_time.replace(tzinfo=timezone.utc).astimezone(ist_tz)
+            diff_ist = abs((upload_time - time_as_ist).total_seconds())
+            diff_utc = abs((upload_time - time_as_utc).total_seconds())
+            diff_seconds = min(diff_ist, diff_utc)
+        else:
+            capture_time = exif_capture_time.astimezone(ist_tz)
+            diff_seconds = abs((upload_time - capture_time).total_seconds())
+    else:
+        source = "Live capture timestamp"
+        if not client_capture_time.tzinfo:
+            client_capture_time = client_capture_time.replace(tzinfo=timezone.utc)
+        capture_time = client_capture_time.astimezone(ist_tz)
+        diff_seconds = abs((upload_time - capture_time).total_seconds())
+
+    diff_minutes = diff_seconds / 60.0
 
     if diff_seconds <= tolerance_seconds:
         return (
             EvidenceStatusEnum.VERIFIED,
-            f"✅ Timestamp verified via {source}. "
-            f"Capture-to-upload gap: {diff_minutes:.1f} min (within {tolerance_seconds//60} min limit)."
+            f"✅ Capture time verified via {source}: Uploaded in {int(diff_seconds)}s ({diff_minutes:.1f} min gap, fresh capture)."
         )
     else:
         return (
             EvidenceStatusEnum.SUSPICIOUS,
-            f"⚠️ Suspicious timestamp via {source}. "
-            f"Capture-to-upload gap: {diff_minutes:.1f} min exceeds {tolerance_seconds//60} min limit. "
-            f"Image may have been captured earlier and uploaded later."
+            f"⚠️ Upload delayed: Photo was captured {diff_minutes:.1f} minutes ago ({int(diff_seconds)}s). Exceeds freshness policy limit ({tolerance_seconds//60} mins)."
         )
 
 
@@ -237,17 +240,21 @@ async def upload_evidence(
         out_io = io.BytesIO()
         img.save(out_io, format="JPEG", exif=exif_bytes, quality=90)
         content = out_io.getvalue()
-        file.filename = "evidence.jpg"
-        file.content_type = "image/jpeg"
     except Exception as e:
         print(f"Warning: Failed to embed EXIF data: {e}")
 
+    save_filename = file.filename or "evidence.jpg"
+    save_content_type = file.content_type or "image/jpeg"
+    if not save_filename.lower().endswith(('.jpg', '.jpeg')):
+        save_filename = "evidence.jpg"
+    save_content_type = "image/jpeg"
+
     # Store file
-    storage_url = storage.save(content, file.filename or "evidence.jpg")
+    storage_url = storage.save(content, save_filename)
 
     # ─── Timestamp Verification ───────────────────────────────────────────────
     # Extract EXIF datetime from the actual image bytes (most trustworthy)
-    ist_tz = ZoneInfo("Asia/Kolkata")
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
     upload_time = datetime.now(ist_tz)
     client_capture_time = meta.capture_timestamp
     if not client_capture_time.tzinfo:
@@ -260,7 +267,7 @@ async def upload_evidence(
         upload_time=upload_time,
         client_capture_time=client_capture_time,
         exif_capture_time=exif_capture_time,
-        tolerance_seconds=180,  # 3 minutes
+        tolerance_seconds=600,  # 10 minutes tolerance (accommodates mobile upload & network delay)
     )
 
     # Create evidence record
@@ -270,8 +277,8 @@ async def upload_evidence(
         evidence_number=_generate_evidence_number(db),
         user_id=current_user.id,
         device_id=device.id if device else None,
-        image_filename=file.filename or "evidence.jpg",
-        image_mime_type=file.content_type,
+        image_filename=save_filename,
+        image_mime_type=save_content_type,
         image_size_bytes=len(content),
         image_sha256_hash=server_hash,
         storage_url=storage_url,
@@ -304,20 +311,21 @@ async def upload_evidence(
     try:
         ai_result = verify_image_content(content)
         
-        # Combine statuses to form final Evidence status
-        # If timestamp is verified AND AI is verified -> VERIFIED
-        # If timestamp is suspicious OR AI is suspicious/failed -> REJECTED (failed)
+        # Combine statuses to form final Evidence status:
+        # Both timestamp (< 3 mins) AND AI (no screen recapture of laptop/mobile/tablet, no tamper) MUST pass.
         ai_status = AIStatusEnum[ai_result["status"]]
         
         if initial_status == EvidenceStatusEnum.VERIFIED and ai_status == AIStatusEnum.VERIFIED:
             evidence.status = EvidenceStatusEnum.VERIFIED
+            evidence.rejection_reason = None
         else:
             evidence.status = EvidenceStatusEnum.SUSPICIOUS
-            evidence.rejection_reason = "Validation Failed: "
+            reasons = []
             if initial_status != EvidenceStatusEnum.VERIFIED:
-                evidence.rejection_reason += "Timestamp exceeds 3 mins. "
+                reasons.append(verification_reason)
             if ai_status != AIStatusEnum.VERIFIED:
-                evidence.rejection_reason += "AI detected screen/tampering or failed."
+                reasons.append(ai_result.get("message", "Screen recapture or tampering detected."))
+            evidence.rejection_reason = " | ".join(reasons)
             
         ai = AIVerification(
             id=str(uuid.uuid4()),

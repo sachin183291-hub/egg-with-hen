@@ -446,6 +446,13 @@ def seed():
 
         db.commit()
         print("[OK] Demo data seed completed successfully!")
+
+        # ── Seed Poultry Farm & BI data ──────────────────────────
+        try:
+            from app.database.seed_poultry import seed_poultry_data
+            seed_poultry_data(force=False)
+        except Exception as spe:
+            print(f"[WARNING] Poultry seed note: {spe}")
         print("\n[INFO] DEMO CREDENTIALS (for testing only):")
         print("  Super Admin:    admin@giotag.gov       / Admin@123!")
         print("  Dept Admin:     deptadmin@giotag.gov   / DeptAdmin@123!")

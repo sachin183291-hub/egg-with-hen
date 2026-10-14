@@ -6,10 +6,10 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   
-  return {
-    plugins: [
-      react(),
-      VitePWA({
+  const plugins = [
+    basicSsl(),
+    react(),
+    VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.svg', 'kr-logo.png', 'bg-image.png'],
         manifest: {
@@ -33,7 +33,10 @@ export default defineConfig(({ mode }) => {
           ]
         }
       })
-    ],
+  ]
+
+  return {
+    plugins,
     server: {
       host: true,
       port: 5173,

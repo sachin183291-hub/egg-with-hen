@@ -118,36 +118,42 @@ class OpenCVVerifier(BaseVerifier):
         # Step 5: Aggregate scores (kept for backwards compatibility of metadata)
         combined_score = (ela_score * 0.5) + (noise_score * 0.5)
 
-        # Step 6: Determine status
-        # Trigger SUSPICIOUS ONLY if LLM detects a screen recapture or if LLM failed
-        is_screen = llm_is_screen
-        llm_error = llm_result.get("error", False)
-        
-        # Graceful degradation on quota limits or missing API keys
-        # We REMOVED the bypass because the user gets confused when it silently defaults to VERIFIED.
-        # Now it will explicitly fail and show the quota error on the frontend.
-            
-        if llm_error:
+        # A photo is SUSPICIOUS if it is a Screen Recapture or has strong tampering
+        llm_ran_ok = (llm_confidence > 0.0) and not llm_result.get("error", False)
+        if llm_ran_ok:
+            # Use intelligent multimodal vision verdict
+            is_screen = llm_is_screen
+        else:
+            # Fallback only when cloud AI is completely unreachable
+            is_screen = moire_is_screen
+
+        # Digital tampering requires substantial compression level anomalies (ELA)
+        is_tampered = (ela_score > 0.70) or (ela_score > 0.50 and noise_score > 0.95)
+
+        if is_screen:
+            status = "SUSPICIOUS"
+            dev_label = llm_result.get("device_type", "digital screen")
+            dev_text = f" ({dev_label} display)" if dev_label and dev_label != "none" else " (laptop, mobile, or tablet screen)"
+            message = (
+                f"Screen Recapture Detected{dev_text}! "
+                f"The AI determined this is a photo taken of a digital screen rather than a physical live scene. "
+                f"{llm_reason if llm_is_screen else 'High-frequency display pixel grid (Moiré pattern) detected.'}"
+            )
+            confidence = max(0.9, llm_confidence, moire_score)
+            tamper_probability = max(0.85, moire_score)
+        elif is_tampered:
             status = "SUSPICIOUS"
             message = (
-                "AI-assisted verification: System Error! "
-                f"The AI device detection failed. Marked as Suspicious by default. Error: {llm_reason}"
+                "AI-assisted verification: Digital Manipulation Detected! "
+                "Significant compression error anomalies or noise variance detected in image content."
             )
-            confidence = 0.5
-            tamper_probability = 0.9
-        elif is_screen:
-            status = "SUSPICIOUS"
-            message = (
-                "AI-assisted verification: Screen Recapture Detected! "
-                f"The AI determined this is a photo of a screen rather than a live photo. Reason: {llm_reason}"
-            )
-            confidence = max(0.9, llm_confidence)
-            tamper_probability = max(0.7, llm_confidence)
+            confidence = 0.85
+            tamper_probability = max(ela_score, noise_score)
         else:
             status = "VERIFIED"
             message = (
-                "AI-assisted verification: Original Live Photo. "
-                "No screen recapture (Moiré patterns) or significant manipulation indicators detected."
+                "AI-assisted verification: Original Live Photo Verified. "
+                "No screen recapture (Moiré patterns) or digital manipulation indicators detected."
             )
             confidence = 0.95
             tamper_probability = combined_score

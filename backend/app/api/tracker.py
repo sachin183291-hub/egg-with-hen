@@ -99,6 +99,12 @@ async def tracker_upload(file: UploadFile = File(...)):
     temp_path = UPLOAD_DIR / filename
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+    root_uploads = Path("../uploads").resolve()
+    if root_uploads.exists() and root_uploads != UPLOAD_DIR:
+        try:
+            shutil.copyfile(temp_path, root_uploads / filename)
+        except Exception:
+            pass
     return {"success": True, "filename": filename}
 
 @router.post("/start_stream")

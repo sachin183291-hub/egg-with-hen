@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS (Wildcard allows mobile testing on local network)
-    CORS_ORIGINS: str = "http://localhost:5173,https://localhost:5173,http://localhost:3000,http://10.215.149.237:5173,https://10.215.149.237:5173"
+    CORS_ORIGINS: str = "http://localhost:5173,https://localhost:5173,http://localhost:3000,http://10.238.244.237:5173,https://10.238.244.237:5173,http://192.168.137.1:5173,https://192.168.137.1:5173,http://10.215.149.237:5173,https://10.215.149.237:5173"
 
     @property
     def cors_origins_list(self) -> List[str]:

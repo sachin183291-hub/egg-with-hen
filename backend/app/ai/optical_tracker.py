@@ -110,11 +110,11 @@ class OpticalHenTracker:
             scale_y = fh / float(AI_H)
 
             results = self.model.predict(
-                source=f_ai,
+                source=frame,
                 verbose=False, 
-                conf=0.08,
+                conf=0.10,
                 iou=0.45,
-                imgsz=512,
+                imgsz=1280,
                 device=self.DEVICE
             )
 
@@ -124,14 +124,10 @@ class OpticalHenTracker:
                 confs = results[0].boxes.conf.cpu().numpy()
 
                 for box, conf in zip(boxes, confs):
-                    if conf < 0.08: continue
-                    x1 = box[0] * scale_x
-                    y1 = box[1] * scale_y
-                    x2 = box[2] * scale_x
-                    y2 = box[3] * scale_y
+                    if conf < 0.10: continue
+                    x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
                     bw, bh = x2 - x1, y2 - y1
-                    if bw < 8 or bh < 8 or bw > 300 or bh > 300: continue
-                    if bw / bh > 2.8 or bh / bw > 2.8: continue
+                    if bw < 5 or bh < 5 or bw > 350 or bh > 350: continue
                     raw_detections.append({
                         "box": [int(x1), int(y1), int(x2), int(y2)],
                         "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
