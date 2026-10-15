@@ -6,7 +6,7 @@ import basicSsl from '@vitejs/plugin-basic-ssl'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   
-  const enableSsl = env.VITE_SSL === 'true' || process.env.VITE_SSL === 'true'
+  const enableSsl = env.VITE_SSL !== 'false' && process.env.VITE_SSL !== 'false'
   
   const plugins = [
     ...(enableSsl ? [basicSsl()] : []),
