@@ -48,6 +48,7 @@ import sqlalchemy
 
 def create_tables():
     """Create all tables (use Alembic for production migrations)."""
+    global engine, SessionLocal
     retries = 5
     for i in range(retries):
         try:
@@ -61,7 +62,6 @@ def create_tables():
             else:
                 print(f"[WARNING] Primary database unavailable ({e}). Falling back to local SQLite to keep server operational.")
                 try:
-                    global engine, SessionLocal
                     backend_dir = Path(__file__).resolve().parent.parent.parent
                     fallback_url = f"sqlite:///{backend_dir / 'giotag.db'}"
                     engine = create_engine(fallback_url, connect_args={"check_same_thread": False})
