@@ -626,8 +626,8 @@ def _sync_generate_frames(video_source, ref_settings=None):
                 cv2.circle(display, (cx_dot, cy_dot), 3, (0, 255, 0), -1)
                 cv2.circle(display, (cx_dot, cy_dot), 1, (255, 255, 255), -1)
 
-                # 4. Solid green badge Hen #{hid} (PERMANENT UNIQUE ID, NEVER REPEATS!)
-                lbl_text = f"Hen #{hid}"
+                # 4. Solid green badge HEAD #{hid} (PERMANENT UNIQUE ID, NEVER REPEATS!)
+                lbl_text = f"HEAD #{hid}"
                 (tw, th), _ = cv2.getTextSize(lbl_text, cv2.FONT_HERSHEY_SIMPLEX, 0.40, 1)
                 badge_y1 = max(0, y1 - th - 6)
                 badge_y2 = y1
@@ -639,11 +639,11 @@ def _sync_generate_frames(video_source, ref_settings=None):
             # Top-Left Telemetry HUD (smooth continuous time display)
             time_s = (f_idx / fps) if fps > 0 else 0.0
             total_sec = (total_frames / fps) if (total_frames and fps > 0) else 5.0
-            cv2.rectangle(display, (8, 12), (195, 74), (0, 0, 0), -1)
-            cv2.rectangle(display, (8, 12), (195, 74), (0, 255, 0), 1)
-            cv2.putText(display, f"TIME: {time_s:.1f}s / {total_sec:.1f}s", (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1, cv2.LINE_AA)
-            cv2.putText(display, f"LIVE HENS: {current_live_count}", (14, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 128), 1, cv2.LINE_AA)
-            cv2.putText(display, f"TOTAL COUNTED: {current_total_count}", (14, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 235, 255), 2, cv2.LINE_AA)
+            cv2.rectangle(display, (8, 12), (210, 78), (0, 0, 0), -1)
+            cv2.rectangle(display, (8, 12), (210, 78), (0, 255, 0), 1)
+            cv2.putText(display, f"TIME: {time_s:.1f}s / {total_sec:.1f}s", (14, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (220, 220, 220), 1, cv2.LINE_AA)
+            cv2.putText(display, f"HEN HEADS: {current_live_count}", (14, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(display, f"TOTAL COUNTED: {current_total_count}", (14, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (0, 215, 255), 2, cv2.LINE_AA)
 
             ret2, buffer = cv2.imencode('.jpg', display, encode_param)
             frame_bytes = buffer.tobytes()
