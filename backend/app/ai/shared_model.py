@@ -26,37 +26,27 @@ def resolve_model_path() -> str:
     _this_dir = os.path.dirname(os.path.abspath(__file__))
     is_cuda = torch.cuda.is_available()
     
-    if is_cuda:
-        candidates = [
-            os.path.abspath(os.path.join(_this_dir, "../../best.pt")),
-            os.path.abspath(os.path.join(_this_dir, "../../../best.pt")),
-            os.path.abspath(os.path.join(os.getcwd(), "best.pt")),
-            os.path.abspath(os.path.join(os.getcwd(), "backend", "best.pt")),
-            "backend/best.pt",
-            "best.pt",
-            os.path.abspath(os.path.join(_this_dir, "../../best.onnx")),
-            os.path.abspath(os.path.join(_this_dir, "../../../best.onnx")),
-            os.path.abspath(os.path.join(os.getcwd(), "best.onnx")),
-            os.path.abspath(os.path.join(os.getcwd(), "backend", "best.onnx")),
-            "backend/best.onnx",
-            "best.onnx",
-        ]
-    else:
-        # On CPU: best.onnx is 11.4x faster (334ms vs 3800ms) with identical comb detection accuracy
-        candidates = [
-            os.path.abspath(os.path.join(_this_dir, "../../best.onnx")),
-            os.path.abspath(os.path.join(_this_dir, "../../../best.onnx")),
-            os.path.abspath(os.path.join(os.getcwd(), "best.onnx")),
-            os.path.abspath(os.path.join(os.getcwd(), "backend", "best.onnx")),
-            "backend/best.onnx",
-            "best.onnx",
-            os.path.abspath(os.path.join(_this_dir, "../../best.pt")),
-            os.path.abspath(os.path.join(_this_dir, "../../../best.pt")),
-            os.path.abspath(os.path.join(os.getcwd(), "best.pt")),
-            os.path.abspath(os.path.join(os.getcwd(), "backend", "best.pt")),
-            "backend/best.pt",
-            "best.pt",
-        ]
+    # Prioritize fast quantized ONNX model (25MB, runs 8x faster on CPU/Render with 512MB RAM)
+    candidates = [
+        os.path.abspath(os.path.join(_this_dir, "../../best_quant.onnx")),
+        os.path.abspath(os.path.join(_this_dir, "../../../best_quant.onnx")),
+        os.path.abspath(os.path.join(os.getcwd(), "backend", "best_quant.onnx")),
+        os.path.abspath(os.path.join(os.getcwd(), "best_quant.onnx")),
+        "backend/best_quant.onnx",
+        "best_quant.onnx",
+        os.path.abspath(os.path.join(_this_dir, "../../best.onnx")),
+        os.path.abspath(os.path.join(_this_dir, "../../../best.onnx")),
+        os.path.abspath(os.path.join(os.getcwd(), "best.onnx")),
+        os.path.abspath(os.path.join(os.getcwd(), "backend", "best.onnx")),
+        "backend/best.onnx",
+        "best.onnx",
+        os.path.abspath(os.path.join(_this_dir, "../../best.pt")),
+        os.path.abspath(os.path.join(_this_dir, "../../../best.pt")),
+        os.path.abspath(os.path.join(os.getcwd(), "best.pt")),
+        os.path.abspath(os.path.join(os.getcwd(), "backend", "best.pt")),
+        "backend/best.pt",
+        "best.pt",
+    ]
     
     candidates += [
         os.path.abspath(os.path.join(_this_dir, "models", "egg_detector.pt")),

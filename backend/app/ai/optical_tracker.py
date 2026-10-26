@@ -111,12 +111,13 @@ class OpticalHenTracker:
 
             try:
                 fh, fw = f.shape[:2]
+                infer_imgsz = 352 if (os.environ.get("RENDER") == "true" or not torch.cuda.is_available()) else 640
                 results = self.model.predict(
                     source=f,
                     verbose=False,
                     conf=0.035,
                     iou=0.40,
-                    imgsz=640,
+                    imgsz=infer_imgsz,
                     device=self.DEVICE
                 )
 
@@ -248,12 +249,13 @@ class OpticalHenTracker:
             # ─── Instant Initial Seed: Spatially ordered 1, 2, 3... ───
             if len(self.hens) == 0:
                 try:
+                    init_imgsz = 352 if (os.environ.get("RENDER") == "true" or not torch.cuda.is_available()) else 640
                     init_res = self.model.predict(
                         source=frame,
                         verbose=False,
                         conf=0.025,
                         iou=0.45,
-                        imgsz=640,
+                        imgsz=init_imgsz,
                         device=self.DEVICE
                     )
                     if init_res and len(init_res) > 0 and init_res[0].boxes is not None:

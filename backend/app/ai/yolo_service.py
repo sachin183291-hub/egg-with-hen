@@ -72,14 +72,16 @@ def detect_objects_image(image: np.ndarray, conf_threshold: float = 0.35, iou_th
     if image is None:
         raise ValueError("Image array is None.")
 
-    # Run inference for main model
-    results = model_instance(image, conf=conf_threshold, iou=iou_threshold, imgsz=640)
+    # Run inference for main model with optimal resolution on CPU/Render
+    import torch
+    target_imgsz = 416 if os.environ.get("RENDER") == "true" or not torch.cuda.is_available() else 640
+    results = model_instance(image, conf=conf_threshold, iou=iou_threshold, imgsz=target_imgsz)
     
     # Run inference for eggs if dedicated egg model is available
     egg_results = None
     if egg_model is not None:
         try:
-            egg_results = egg_model(image, conf=conf_threshold, iou=iou_threshold, imgsz=640)
+            egg_results = egg_model(image, conf=conf_threshold, iou=iou_threshold, imgsz=target_imgsz)
         except Exception:
             egg_results = None
 

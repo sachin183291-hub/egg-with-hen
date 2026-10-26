@@ -111,55 +111,7 @@ async def tracker_upload(file: UploadFile = File(...)):
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # If recorded as webm from mobile browser MediaRecorder, convert to ultra-fast 30fps mp4
-        if safe_filename.lower().endswith(".webm"):
-            try:
-                import subprocess, imageio_ffmpeg
-                mp4_filename = safe_filename.rsplit(".", 1)[0] + ".mp4"
-                mp4_path = UPLOAD_DIR / mp4_filename
-                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-                cmd = [
-                    ffmpeg_exe, "-y",
-                    "-i", str(temp_path),
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",
-                    "-fflags", "+genpts",
-                    "-r", "30",
-                    "-pix_fmt", "yuv420p",
-                    str(mp4_path)
-                ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-                safe_filename = mp4_filename
-                temp_path = mp4_path
-            except Exception as e:
-                print(f"[TRACKER] webm to mp4 conversion notice: {e}")
-
-        # Generate ultra-fast 480p proxy so decoding runs at 200+ FPS with minimal CPU load
-        try:
-            import cv2
-            _cap = cv2.VideoCapture(str(temp_path))
-            _w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            _h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            _cap.release()
-            if _w > 640 or _h > 360:
-                opt_name = f"_opt_{safe_filename}"
-                opt_path = UPLOAD_DIR / opt_name
-                if not opt_path.exists():
-                    import subprocess, imageio_ffmpeg
-                    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-                    cmd = [
-                        ffmpeg_exe, "-y",
-                        "-i", str(temp_path),
-                        "-vf", "scale=-2:480",
-                        "-c:v", "libx264",
-                        "-preset", "ultrafast",
-                        "-pix_fmt", "yuv420p",
-                        str(opt_path)
-                    ]
-                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        except Exception as e:
-            print(f"[TRACKER] 4K proxy note: {e}")
-
+        # Return immediately so upload finishes in milliseconds without CPU bottleneck
         return {"success": True, "filename": safe_filename}
     except Exception as e:
         return {"success": False, "error": str(e)}

@@ -20,6 +20,7 @@ opencv-python-headless==4.9.0.80
 Pillow>=11.1.0
 numpy==1.26.4
 ultralytics
+onnxruntime>=1.19.0
 
 # OpenAI Vision
 openai>=1.30.0
