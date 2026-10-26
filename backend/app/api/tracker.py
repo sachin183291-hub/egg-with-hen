@@ -74,6 +74,10 @@ def reset_tracking():
     global global_live_tracker
     if global_live_tracker is not None:
         global_live_tracker.reset_state()
+    if flask_app:
+        flask_app.current_total_count = 0
+        flask_app.current_live_count = 0
+        flask_app.active_stream_session_id += 1
     return {"success": True}
 
 # ─── Flask Legacy Integration for Hen Comb Tracking ────────────────────────────
@@ -110,6 +114,14 @@ async def tracker_upload(file: UploadFile = File(...)):
         temp_path = UPLOAD_DIR / safe_filename
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+
+        # Reset counts and tracker state for this new video so count starts fresh from beginning
+        global global_live_tracker
+        if global_live_tracker is not None:
+            global_live_tracker.reset_state()
+        if flask_app:
+            flask_app.current_total_count = 0
+            flask_app.current_live_count = 0
 
         # Return immediately so upload finishes in milliseconds without CPU bottleneck
         return {"success": True, "filename": safe_filename}

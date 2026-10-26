@@ -147,7 +147,7 @@ export default function HenCombTrackingPage() {
         video.controls = true
         video.muted = true
         video.playsInline = true
-        video.loop = true
+        video.loop = false
       }
 
       try {
@@ -188,6 +188,11 @@ export default function HenCombTrackingPage() {
     setShowUploadChoiceModal(false)
     setPendingVideoFile(null)
 
+    // Reset tracking state on backend so new video count starts fresh from beginning
+    try {
+      fetch(`${getTrackerBaseUrl()}/reset`, { method: 'POST' }).catch(() => {})
+    } catch (e) {}
+
     const blobUrl = URL.createObjectURL(file)
     setLocalVideoUrl(blobUrl)
     setStreamUrl(null)
@@ -195,9 +200,25 @@ export default function HenCombTrackingPage() {
     setTotalCount(0)
     setVisibleCount(0)
     startTimeRef.current = Date.now()
+    frameNumberRef.current = 0
+    lastSendRef.current = 0
     runningRef.current = false
     latestResultsRef.current = []
     animBoxesRef.current.clear()
+  }
+
+  const handleVideoPlay = () => {
+    // If replayed from start (e.g. within first 0.6s), reset counts fresh from beginning
+    if (videoRef.current && videoRef.current.currentTime < 0.6) {
+      try {
+        fetch(`${getTrackerBaseUrl()}/reset`, { method: 'POST' }).catch(() => {})
+      } catch (e) {}
+      setTotalCount(0)
+      setVisibleCount(0)
+      frameNumberRef.current = 0
+      latestResultsRef.current = []
+      animBoxesRef.current.clear()
+    }
   }
 
   const startCloudUpload = (file: File) => {
@@ -207,6 +228,13 @@ export default function HenCombTrackingPage() {
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
     setUploadStatusText(`Preparing upload (${sizeMB} MB)...`)
     setIsProcessing(true)
+
+    // Reset counts on backend so new video starts fresh from 0
+    try {
+      fetch(`${getTrackerBaseUrl()}/reset`, { method: 'POST' }).catch(() => {})
+    } catch (e) {}
+    setTotalCount(0)
+    setVisibleCount(0)
 
     const activeBackendUrl = getTrackerBaseUrl()
     const formData = new FormData()
@@ -306,6 +334,11 @@ export default function HenCombTrackingPage() {
   const startDemoVideo = () => {
     stopLiveCamera()
     setErrorMsg(null)
+    try {
+      fetch(`${getTrackerBaseUrl()}/reset`, { method: 'POST' }).catch(() => {})
+    } catch (e) {}
+    setTotalCount(0)
+    setVisibleCount(0)
     const activeBackendUrl = getTrackerBaseUrl()
     setStreamUrl(`${activeBackendUrl}/stream_video/demo_hen_video.mp4?t=${Date.now()}`)
     setStreamMode('video')
@@ -1148,7 +1181,7 @@ export default function HenCombTrackingPage() {
               playsInline
               controls
               autoPlay
-              loop
+              onPlay={handleVideoPlay}
               style={{ width: '100%', height: '100%', objectFit: fitMode }}
             />
             <canvas
@@ -1681,7 +1714,7 @@ export default function HenCombTrackingPage() {
                     playsInline
                     controls
                     autoPlay
-                    loop
+                    onPlay={handleVideoPlay}
                     style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: fitMode }}
                   />
                   <canvas
