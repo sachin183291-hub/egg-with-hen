@@ -658,7 +658,7 @@ export default function HenCombTrackingPage() {
       // Top-right
       ctx.beginPath()
       ctx.moveTo(x + width - cornerLen, y)
-      ctx.lineTo(x + width)
+      ctx.lineTo(x + width, y)
       ctx.lineTo(x + width, y + cornerLen)
       ctx.stroke()
       // Bottom-left
