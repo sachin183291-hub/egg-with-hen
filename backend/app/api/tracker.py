@@ -30,9 +30,17 @@ def get_model_path():
         os.path.abspath(os.path.join(os.getcwd(), "backend", "best.pt")),
         os.path.join(backend_dir, "weights", "best.pt"),
         os.path.join(base_dir, "weights", "best.pt"),
+        "backend/best.pt",
+        "best.pt",
+        os.path.join(backend_dir, "best.onnx"),
+        os.path.join(base_dir, "best.onnx"),
+        os.path.join(base_dir, "backend", "best.onnx"),
+        os.path.abspath(os.path.join(os.getcwd(), "best.onnx")),
+        os.path.abspath(os.path.join(os.getcwd(), "backend", "best.onnx")),
+        "backend/best.onnx",
+        "best.onnx",
         os.path.join(backend_dir, "yolov8n.pt"),
         os.path.join(base_dir, "yolov8n.pt"),
-        "best.pt",
     ]
     for p in possible_paths:
         if os.path.exists(p):
@@ -90,22 +98,71 @@ class StreamSource(BaseModel):
 
 import shutil
 
-UPLOAD_DIR = Path("uploads").resolve()
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+UPLOAD_DIR = (PROJECT_ROOT / "uploads").resolve()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.post("/upload")
 async def tracker_upload(file: UploadFile = File(...)):
-    filename = file.filename
-    temp_path = UPLOAD_DIR / filename
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    root_uploads = Path("../uploads").resolve()
-    if root_uploads.exists() and root_uploads != UPLOAD_DIR:
+    try:
+        raw_name = file.filename or "video.mp4"
+        safe_filename = Path(raw_name).name
+        temp_path = UPLOAD_DIR / safe_filename
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # If recorded as webm from mobile browser MediaRecorder, convert to ultra-fast 30fps mp4
+        if safe_filename.lower().endswith(".webm"):
+            try:
+                import subprocess, imageio_ffmpeg
+                mp4_filename = safe_filename.rsplit(".", 1)[0] + ".mp4"
+                mp4_path = UPLOAD_DIR / mp4_filename
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                cmd = [
+                    ffmpeg_exe, "-y",
+                    "-i", str(temp_path),
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-fflags", "+genpts",
+                    "-r", "30",
+                    "-pix_fmt", "yuv420p",
+                    str(mp4_path)
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                safe_filename = mp4_filename
+                temp_path = mp4_path
+            except Exception as e:
+                print(f"[TRACKER] webm to mp4 conversion notice: {e}")
+
+        # Generate ultra-fast 480p proxy so decoding runs at 200+ FPS with minimal CPU load
         try:
-            shutil.copyfile(temp_path, root_uploads / filename)
-        except Exception:
-            pass
-    return {"success": True, "filename": filename}
+            import cv2
+            _cap = cv2.VideoCapture(str(temp_path))
+            _w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            _h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            _cap.release()
+            if _w > 640 or _h > 360:
+                opt_name = f"_opt_{safe_filename}"
+                opt_path = UPLOAD_DIR / opt_name
+                if not opt_path.exists():
+                    import subprocess, imageio_ffmpeg
+                    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                    cmd = [
+                        ffmpeg_exe, "-y",
+                        "-i", str(temp_path),
+                        "-vf", "scale=-2:480",
+                        "-c:v", "libx264",
+                        "-preset", "ultrafast",
+                        "-pix_fmt", "yuv420p",
+                        str(opt_path)
+                    ]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        except Exception as e:
+            print(f"[TRACKER] 4K proxy note: {e}")
+
+        return {"success": True, "filename": safe_filename}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 @router.post("/start_stream")
 async def tracker_start_stream(source: StreamSource):
@@ -117,18 +174,24 @@ async def tracker_start_stream(source: StreamSource):
 async def tracker_stop_stream():
     if flask_app:
         flask_app.active_stream = None
+        flask_app.current_total_count = 0
+        flask_app.current_live_count = 0
     return {"success": True}
 
 @router.get("/stream_count")
 async def tracker_stream_count():
     count = 0
-    if flask_app and hasattr(flask_app, 'current_total_count'):
-        count = flask_app.current_total_count
-    return {"success": True, "count": count}
+    live = 0
+    if flask_app:
+        count = getattr(flask_app, 'current_total_count', 0)
+        live = getattr(flask_app, 'current_live_count', 0)
+    return {"success": True, "count": count, "live_count": live}
 
-@router.get("/stream_video/{filename}")
-async def stream_video_file(filename: str):
-    filepath = str(UPLOAD_DIR / filename)
+@router.get("/stream_video/{filename:path}")
+def stream_video_file(filename: str):
+    import urllib.parse
+    clean_filename = urllib.parse.unquote(filename)
+    filepath = str(UPLOAD_DIR / clean_filename)
     if not os.path.exists(filepath):
         # Fallback check relative to cwd or root uploads
         possible = [
@@ -144,7 +207,11 @@ async def stream_video_file(filename: str):
             filepath = found
         else:
             raise HTTPException(status_code=404, detail=f"Video '{filename}' not found on server")
-            
+
+    opt_file = UPLOAD_DIR / f"_opt_{clean_filename}"
+    if opt_file.exists():
+        filepath = str(opt_file)
+
     if not flask_app:
         raise HTTPException(status_code=500, detail="Video streaming module not available")
         
@@ -164,7 +231,7 @@ async def stream_video_file(filename: str):
     )
 
 @router.get("/stream_video")
-async def stream_video_cam():
+def stream_video_cam():
     if not flask_app:
         raise HTTPException(status_code=500, detail="Streaming module not initialized")
     

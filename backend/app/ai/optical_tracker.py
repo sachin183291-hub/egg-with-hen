@@ -8,6 +8,74 @@ import os
 import torch
 from ultralytics import YOLO
 
+def extract_snug_heads(disp_img, x1, y1, x2, y2, fw, fh, full_mask=None):
+    """
+    Extracts snug, individual-sized bounding boxes strictly covering each hen's head and comb.
+    Decomposes multi-hen boxes into individual heads so zero hens are missed.
+    """
+    x1, y1 = max(0, int(x1)), max(0, int(y1))
+    x2, y2 = min(fw - 1, int(x2)), min(fh - 1, int(y2))
+    bw, bh = x2 - x1, y2 - y1
+    if bw < 6 or bh < 6:
+        return []
+
+    if full_mask is None:
+        crop = disp_img[y1:y2, x1:x2]
+        if crop.size == 0:
+            return []
+        b, g, r = cv2.split(crop.astype(np.float32))
+        red_diff = r - np.maximum(g, b)
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        crop_mask = ((red_diff > 16) & (s > 32) & (v > 42) & ((h < 22) | (h > 158))).astype(np.uint8)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        crop_mask = cv2.morphologyEx(crop_mask, cv2.MORPH_OPEN, kernel)
+    else:
+        crop_mask = full_mask[y1:y2, x1:x2]
+        if crop_mask.size == 0:
+            return []
+
+    max_head_w = max(38, int(fw * 0.08))
+    max_head_h = max(42, int(fh * 0.09))
+
+    heads = []
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(crop_mask)
+    found_comp = False
+
+    for idx in range(1, num_labels):
+        area = stats[idx, cv2.CC_STAT_AREA]
+        cw = stats[idx, cv2.CC_STAT_WIDTH]
+        ch = stats[idx, cv2.CC_STAT_HEIGHT]
+        if area >= 20 and cw >= 6 and ch >= 6:
+            comp_cx, comp_cy = centroids[idx]
+            head_w = max(24, min(max_head_w, int(cw * 1.30 + 8)))
+            head_h = max(26, min(max_head_h, int(ch * 1.30 + 10)))
+            cx = x1 + comp_cx
+            cy = y1 + comp_cy
+            heads.append([
+                max(0, int(cx - head_w / 2.0)),
+                max(0, int(cy - head_h / 2.0)),
+                min(fw - 1, int(cx + head_w / 2.0)),
+                min(fh - 1, int(cy + head_h / 2.0))
+            ])
+            found_comp = True
+
+    if not found_comp and bw <= max_head_w * 1.1 and bh <= max_head_h * 1.1 and bw >= 12 and bh >= 12:
+        if np.sum(crop_mask) >= 8:
+            cx = (x1 + x2) / 2.0
+            cy = (y1 + y2) / 2.0
+            head_w = max(24, min(max_head_w, bw))
+            head_h = max(26, min(max_head_h, bh))
+            heads.append([
+                max(0, int(cx - head_w / 2.0)),
+                max(0, int(cy - head_h / 2.0)),
+                min(fw - 1, int(cx + head_w / 2.0)),
+                min(fh - 1, int(cy + head_h / 2.0))
+            ])
+
+    return heads
+
+
 class OpticalHenTracker:
     def __init__(self, model_path=None):
         self.MODEL_PATH = model_path
@@ -16,318 +84,498 @@ class OpticalHenTracker:
         from app.ai.shared_model import get_shared_model
         self.model = get_shared_model(model_path)
         
-        # ByteTrack config
-        possible_yamls = [
-            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../bytetrack_hen.yaml")),
-            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../bytetrack_hen.yaml")),
-            os.path.abspath(os.path.join(os.getcwd(), "bytetrack_hen.yaml")),
-            os.path.abspath(os.path.join(os.getcwd(), "backend", "bytetrack_hen.yaml")),
-        ]
-        self.TRACKER_YAML = next((y for y in possible_yamls if os.path.exists(y)), "bytetrack.yaml")
-            
         self.state_lock = threading.RLock()
-        self.inference_lock = threading.Lock()
+        self.ai_lock = threading.Lock()
+        
+        self.ai_frame = None
+        self.ai_results = None
+        self.ai_running = True
         
         self.reset_state()
         
+        # Background worker for continuous YOLO inference without blocking frame stream
+        self.worker_thread = threading.Thread(target=self._ai_worker, daemon=True)
+        self.worker_thread.start()
+
+    def _ai_worker(self):
+        """Background thread running YOLO inference continuously."""
+        while self.ai_running:
+            f = None
+            with self.ai_lock:
+                if self.ai_frame is not None:
+                    f = self.ai_frame
+                    self.ai_frame = None
+            if f is None:
+                time.sleep(0.01)
+                continue
+
+            try:
+                fh, fw = f.shape[:2]
+                results = self.model.predict(
+                    source=f,
+                    verbose=False,
+                    conf=0.035,
+                    iou=0.40,
+                    imgsz=640,
+                    device=self.DEVICE
+                )
+
+                raw_dets = []
+                if results and len(results) > 0 and results[0].boxes is not None:
+                    boxes = results[0].boxes.xyxy.cpu().numpy()
+                    confs = results[0].boxes.conf.cpu().numpy()
+
+                    # Dynamic Zone definition (stored for new-hen gating in process_live_frame)
+                    if fw < fh:
+                        self._zone = (int(fw * 0.01), int(fh * 0.02), int(fw * 0.99), int(fh * 0.98))
+                    else:
+                        self._zone = (int(fw * 0.01), int(fh * 0.02), int(fw * 0.99), int(fh * 0.98))
+
+                    max_comb_w = max(60, int(fw * (0.35 if fw < fh else 0.18)))
+                    max_comb_h = max(60, int(fh * (0.22 if fw < fh else 0.22)))
+                    max_area = int(max_comb_w * max_comb_h * 0.90)
+
+                    hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
+                    h_ch, s_ch, v_ch = cv2.split(hsv)
+                    b_ch, g_ch, r_ch = cv2.split(f.astype(np.float32))
+                    comb_red = (
+                        (((h_ch >= 150) | (h_ch <= 15)) & (s_ch > 32) & (v_ch > 40) & ((r_ch - g_ch) > 12)) |
+                        (((r_ch - np.maximum(g_ch, b_ch)) > 15) & (s_ch > 30) & (v_ch > 45))
+                    )
+
+                    for box, conf in zip(boxes, confs):
+                        x1, y1, x2, y2 = map(int, box)
+                        hw = x2 - x1
+                        hh = y2 - y1
+                        if hw < 8 or hh < 8:
+                            continue
+                        if hw > max_comb_w or hh > max_comb_h or (hw * hh) > max_area:
+                            continue
+
+                        crop_red = comb_red[y1:y2, x1:x2]
+                        ys, xs = np.where(crop_red)
+                        scale_factor = max(fw, fh) / 640.0
+                        if len(xs) >= 6:
+                            cx = x1 + float(np.median(xs))
+                            cy = y1 + float(np.median(ys))
+                            w_comb = float(np.percentile(xs, 90) - np.percentile(xs, 10))
+                            h_comb = float(np.percentile(ys, 90) - np.percentile(ys, 10))
+                            base_sz = max(24.0 * scale_factor, min(38.0 * scale_factor, max(w_comb, h_comb) + 6.0))
+                        else:
+                            cx = (x1 + x2) / 2.0
+                            cy = (y1 + y2) / 2.0
+                            base_sz = max(24.0 * scale_factor, min(38.0 * scale_factor, max(hw, hh) + 4.0))
+
+                        hw_box = base_sz / 2.0
+                        hh_box = base_sz / 2.0
+                        box_final = [
+                            max(0.0, float(cx - hw_box)),
+                            max(0.0, float(cy - hh_box)),
+                            min(float(fw - 1), float(cx + hw_box)),
+                            min(float(fh - 1), float(cy + hh_box))
+                        ]
+
+                        # Reject ceiling fixtures at top
+                        if box_final[1] <= 6:
+                            continue
+
+                        # Zone check: only detect combs inside the detection zone
+                        z = getattr(self, '_zone', None)
+                        if z is not None and not (z[0] <= cx <= z[2] and z[1] <= cy <= z[3]):
+                            continue
+
+                        raw_dets.append({
+                            "box": box_final,
+                            "center": (cx, cy),
+                            "conf": float(conf),
+                            "diag": math.hypot(box_final[2] - box_final[0], box_final[3] - box_final[1])
+                        })
+
+                # Deduplicate: strictly ONE box per hen head
+                raw_dets.sort(key=lambda d: d["conf"], reverse=True)
+                kept_dets = []
+                for d in raw_dets:
+                    c1 = d["center"]
+                    diag1 = d["diag"]
+                    overlap = False
+                    for ex in kept_dets:
+                        c2 = ex["center"]
+                        diag2 = ex["diag"]
+                        if math.hypot(c1[0] - c2[0], c1[1] - c2[1]) < min(diag1, diag2) * 0.40 or math.hypot(c1[0] - c2[0], c1[1] - c2[1]) < 22:
+                            overlap = True
+                            break
+                    if not overlap:
+                        kept_dets.append(d)
+
+                with self.ai_lock:
+                    self.ai_results = kept_dets
+
+            except Exception as e:
+                pass
+
     def reset_state(self):
         with self.state_lock:
             self.hens = {}
             self.next_hen_number = 1
+            self.max_total_hens = 0
+            self.prev_gray = None
             self.prev_small_gray = None
-            
             self.latest_detections = []
             self.latest_frame_number = 0
             self.latest_video_time = 0.0
             self.total_inference_count = 0
-            self.ai_fps = 0.0
-            self.ai_error = None
-            
-            try:
-                if getattr(self.model, "predictor", None) is not None:
-                    self.model.predictor = None
-            except:
-                pass
+            self.ai_fps = 30.0
 
-    def is_pure_comb(self, box, frame):
-        x1, y1, x2, y2 = map(int, box)
-        w = x2 - x1
-        h = y2 - y1
-        if w <= 8 or h <= 8:
-            return False
-        # Model is specifically trained on HEN_COMB - allow all genuine comb/head sizes
-        if w > 350 or h > 350:
-            return False
-        return True
+        with self.ai_lock:
+            self.ai_frame = None
+            self.ai_results = None
 
     def process_live_frame(self, frame, frame_number, video_time):
-        # Auto-reset if user rewinds or replays video from start
-        if video_time < (self.latest_video_time - 0.8) and self.latest_video_time > 1.0:
-            self.reset_state()
-
-        # Non-blocking lock for fast UI
-        if not self.inference_lock.acquire(blocking=False):
-            with self.state_lock:
-                verified_total = len([h for h in self.hens.values() if h.get("hits", 0) >= 1])
-                return {
-                    "success": True, "busy": True, "video_time": video_time,
-                    "detections": self.latest_detections,
-                    "total_hens": verified_total,
-                    "visible_hens": len(self.latest_detections),
-                    "ai_frames": self.total_inference_count,
-                    "ai_fps": round(self.ai_fps, 2)
-                }
-        
         started = time.time()
-        try:
-            fh, fw = frame.shape[:2]
+        fh, fw = frame.shape[:2]
 
-            # ─── 0. Fast Camera Motion Compensation ───
+        with self.state_lock:
+            self.latest_frame_number = frame_number
+            self.latest_video_time = video_time
+            self.total_inference_count += 1
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # Boxes remain anchored to detected hen heads; zero artificial drift
             small_gray = cv2.cvtColor(cv2.resize(frame, (320, 180)), cv2.COLOR_BGR2GRAY).astype(np.float32)
-            cam_dx, cam_dy = 0.0, 0.0
-            if getattr(self, "prev_small_gray", None) is not None:
-                shift, response = cv2.phaseCorrelate(self.prev_small_gray, small_gray)
-                if response > 0.04 and abs(shift[0]) < 25 and abs(shift[1]) < 25:
-                    cam_dx = shift[0] * (fw / 320.0)
-                    cam_dy = shift[1] * (fh / 180.0)
             self.prev_small_gray = small_gray
 
-            # Update existing tracks with camera translation
-            with self.state_lock:
-                for num, data in self.hens.items():
-                    data["lost_frames"] += 1
-                    data["seen"] = False
-                    cx, cy = data["center"]
-                    data["center"] = (cx + cam_dx, cy + cam_dy)
-                    if "smooth_box" in data:
-                        sb = data["smooth_box"]
-                        data["smooth_box"] = [sb[0] + cam_dx, sb[1] + cam_dy, sb[2] + cam_dx, sb[3] + cam_dy]
+            # ─── Instant Initial Seed: Spatially ordered 1, 2, 3... ───
+            if len(self.hens) == 0:
+                try:
+                    init_res = self.model.predict(
+                        source=frame,
+                        verbose=False,
+                        conf=0.025,
+                        iou=0.45,
+                        imgsz=640,
+                        device=self.DEVICE
+                    )
+                    if init_res and len(init_res) > 0 and init_res[0].boxes is not None:
+                        boxes = init_res[0].boxes.xyxy.cpu().numpy()
+                        confs = init_res[0].boxes.conf.cpu().numpy()
+                        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                        h_ch, s_ch, v_ch = cv2.split(hsv)
+                        b_ch, g_ch, r_ch = cv2.split(frame.astype(np.float32))
+                        comb_red = (
+                            (((h_ch >= 150) | (h_ch <= 15)) & (s_ch > 32) & (v_ch > 40) & ((r_ch - g_ch) > 12)) |
+                            (((r_ch - np.maximum(g_ch, b_ch)) > 15) & (s_ch > 30) & (v_ch > 45))
+                        )
+                        init_candidates = []
+                        scale_factor = max(fw, fh) / 640.0
+                        for box, conf in zip(boxes, confs):
+                            x1, y1, x2, y2 = map(int, box)
+                            x1, y1 = max(0, min(fw - 1, x1)), max(0, min(fh - 1, y1))
+                            x2, y2 = max(0, min(fw - 1, x2)), max(0, min(fh - 1, y2))
+                            crop_red = comb_red[y1:y2, x1:x2]
+                            comb_px = np.count_nonzero(crop_red)
+                            if comb_px < 14:
+                                continue
+                            ys, xs = np.where(crop_red)
+                            if len(xs) >= 10:
+                                cx = x1 + float(np.median(xs))
+                                cy = y1 + float(np.median(ys))
+                                w_comb = float(np.percentile(xs, 90) - np.percentile(xs, 10))
+                                h_comb = float(np.percentile(ys, 90) - np.percentile(ys, 10))
+                                base_sz = max(26.0 * scale_factor, min(38.0 * scale_factor, max(w_comb, h_comb) + 6.0))
+                                hw, hh = base_sz / 2.0, base_sz / 2.0
+                                box_final = [
+                                    max(0.0, float(cx - hw)),
+                                    max(0.0, float(cy - hh)),
+                                    min(float(fw - 1), float(cx + hw)),
+                                    min(float(fh - 1), float(cy + hh))
+                                ]
+                                init_candidates.append({
+                                    "box": box_final,
+                                    "center": (cx, cy),
+                                    "conf": float(conf)
+                                })
 
-            # ─── 1. Run YOLO inference (Optimized for 512MB RAM and 100% comb recall) ───
-            AI_W, AI_H = 960, 540
-            f_ai = cv2.resize(frame, (AI_W, AI_H)) if (fw != AI_W or fh != AI_H) else frame
-            scale_x = fw / float(AI_W)
-            scale_y = fh / float(AI_H)
+                        # Sort bottom-to-top ("killa irunthu mela") so Hen #1 is at the bottom
+                        init_candidates.sort(key=lambda d: -d["center"][1] * 2.0 + d["center"][0])
+                        for d in init_candidates:
+                            # Assign strictly new permanent number (never reuse, never repeat)
+                            hid = self.next_hen_number
+                            self.next_hen_number += 1
 
-            results = self.model.predict(
-                source=frame,
-                verbose=False, 
-                conf=0.10,
-                iou=0.45,
-                imgsz=1280,
-                device=self.DEVICE
-            )
+                            self.hens[hid] = {
+                                "box": d["box"],
+                                "center": d["center"],
+                                "velocity": (0.0, 0.0),
+                                "lost": 0,
+                                "hits": 3,
+                                "conf": d["conf"]
+                            }
+                        self.max_total_hens = max(self.max_total_hens, len(self.hens))
+                except Exception:
+                    pass
 
-            raw_detections = []
-            if results and len(results) > 0 and results[0].boxes is not None:
-                boxes = results[0].boxes.xyxy.cpu().numpy()
-                confs = results[0].boxes.conf.cpu().numpy()
+            # ─── 1. Multi-Point Optical Flow PyrLK: Tight points locked inside head/comb ───
+            active_ids = [hid for hid, hdata in self.hens.items() if hdata["lost"] <= 12]
+            if len(active_ids) > 0 and self.prev_gray is not None:
+                pts_in = []
+                pt_map = []
+                for hid in active_ids:
+                    x1, y1, x2, y2 = self.hens[hid]["box"]
+                    cx, cy = self.hens[hid]["center"]
+                    bw = x2 - x1
+                    bh = y2 - y1
+                    quad_pts = [
+                        (cx, cy),
+                        (cx - bw * 0.22, cy - bh * 0.22),
+                        (cx + bw * 0.22, cy - bh * 0.22),
+                        (cx - bw * 0.22, cy + bh * 0.22),
+                        (cx + bw * 0.22, cy + bh * 0.22),
+                    ]
+                    for p in quad_pts:
+                        pts_in.append([[p[0], p[1]]])
+                        pt_map.append(hid)
 
-                for box, conf in zip(boxes, confs):
-                    if conf < 0.10: continue
-                    x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
-                    bw, bh = x2 - x1, y2 - y1
-                    if bw < 5 or bh < 5 or bw > 350 or bh > 350: continue
-                    raw_detections.append({
-                        "box": [int(x1), int(y1), int(x2), int(y2)],
-                        "center": ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
-                        "size": (bw, bh),
-                        "conf": float(conf)
-                    })
+                pts_in_arr = np.array(pts_in, dtype=np.float32)
+                # Larger window and higher pyramid level for fast head movement / turning
+                pts_out, status, _ = cv2.calcOpticalFlowPyrLK(
+                    self.prev_gray, gray, pts_in_arr, None,
+                    winSize=(21, 21), maxLevel=3,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 12, 0.03)
+                )
 
-            # Sort purely by confidence
-            raw_detections.sort(key=lambda d: d["conf"], reverse=True)
+                hen_shifts = {hid: [] for hid in active_ids}
+                for i, hid in enumerate(pt_map):
+                    if status[i][0] == 1:
+                        dx = float(pts_out[i][0][0] - pts_in_arr[i][0][0])
+                        dy = float(pts_out[i][0][1] - pts_in_arr[i][0][1])
+                        if abs(dx) < 15 and abs(dy) < 15:
+                            hen_shifts[hid].append((dx, dy))
 
-            # ─── 2. Deduplicate only true overlapping boxes (IoU > 0.45) ───
-            # Keeps neighboring hens even when standing closely side-by-side
-            detections = []
-            for r_det in raw_detections:
-                rx1, ry1, rx2, ry2 = r_det["box"]
+                for hid, shifts in hen_shifts.items():
+                    if len(shifts) >= 1:
+                        mdx = float(np.median([s[0] for s in shifts]))
+                        mdy = float(np.median([s[1] for s in shifts]))
+                        b = self.hens[hid]["box"]
+                        self.hens[hid]["box"] = [b[0] + mdx, b[1] + mdy, b[2] + mdx, b[3] + mdy]
+                        cx = (self.hens[hid]["box"][0] + self.hens[hid]["box"][2]) / 2.0
+                        cy = (self.hens[hid]["box"][1] + self.hens[hid]["box"][3]) / 2.0
+                        self.hens[hid]["center"] = (cx, cy)
+                        self.hens[hid]["velocity"] = (mdx, mdy)
+                    else:
+                        # Keep box firmly anchored to head, zero drift into side
+                        self.hens[hid]["velocity"] = (0.0, 0.0)
+                        self.hens[hid]["lost"] += 1
+
+            self.prev_gray = gray
+
+            # ─── 2. Integrate fresh YOLO comb detections from background worker ───
+            fresh = None
+            with self.ai_lock:
+                if self.ai_results is not None:
+                    fresh = self.ai_results
+                    self.ai_results = None
+
+            def _box_iou(b1, b2):
+                ix1, iy1 = max(b1[0], b2[0]), max(b1[1], b2[1])
+                ix2, iy2 = min(b1[2], b2[2]), min(b1[3], b2[3])
+                iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+                inter = iw * ih
+                if inter <= 0:
+                    return 0.0
+                a1 = (b1[2] - b1[0]) * (b1[3] - b1[1])
+                a2 = (b2[2] - b2[0]) * (b2[3] - b2[1])
+                u = a1 + a2 - inter
+                return inter / u if u > 0 else 0.0
+
+            if fresh is not None:
+                used_dets = set()
+                used_hens = set()
+
+                z = getattr(self, '_zone', None)
+                def is_in_zone(x, y):
+                    if z is None:
+                        return True
+                    return z[0] <= x <= z[2] and z[1] <= y <= z[3]
+
+                # Stage 1: Match active and remembered tracks with stable radius
+                MAX_LOST_MEMORY = 30
+                active_matches = []
+                for det_idx, det in enumerate(fresh):
+                    cx, cy = det["center"]
+                    for hid, hdata in self.hens.items():
+                        if hdata["lost"] > MAX_LOST_MEMORY:
+                            continue
+                        hx, hy = hdata["center"]
+                        if not is_in_zone(hx, hy):
+                            continue
+                        vx, vy = hdata.get("velocity", (0.0, 0.0))
+                        pred_hx = hx + vx * min(hdata["lost"], 3)
+                        pred_hy = hy + vy * min(hdata["lost"], 3)
+                        dist = min(math.hypot(cx - hx, cy - hy), math.hypot(cx - pred_hx, cy - pred_hy))
+                        iou = _box_iou(hdata["box"], det["box"])
+                        max_match = 50.0  # Stable radius to keep ID locked to hen
+                        if iou >= 0.15 or dist <= max_match:
+                            cost = (1.0 - iou) * 0.4 + (dist / max_match) * 0.6
+                            active_matches.append((cost, det_idx, hid))
+
+                active_matches.sort(key=lambda m: m[0])
+                for cost, det_idx, hid in active_matches:
+                    if det_idx in used_dets or hid in used_hens:
+                        continue
+                    used_dets.add(det_idx)
+                    used_hens.add(hid)
+                    det = fresh[det_idx]
+                    nb = det["box"]
+                    det_cx, det_cy = det["center"]
+                    old_cx, old_cy = self.hens[hid]["center"]
+                    old_b = self.hens[hid]["box"]
+
+                    # Smooth position & box update: follows hen head smoothly, ZERO box jumping
+                    SMOOTH = 0.40
+                    SMOOTH_INV = 0.60
+                    self.hens[hid]["box"] = [
+                        SMOOTH * nb[0] + SMOOTH_INV * old_b[0],
+                        SMOOTH * nb[1] + SMOOTH_INV * old_b[1],
+                        SMOOTH * nb[2] + SMOOTH_INV * old_b[2],
+                        SMOOTH * nb[3] + SMOOTH_INV * old_b[3]
+                    ]
+                    self.hens[hid]["center"] = (SMOOTH * det_cx + SMOOTH_INV * old_cx, SMOOTH * det_cy + SMOOTH_INV * old_cy)
+                    self.hens[hid]["velocity"] = (det_cx - old_cx, det_cy - old_cy)
+                    self.hens[hid]["lost"] = 0
+                    self.hens[hid]["hits"] = self.hens[hid].get("hits", 0) + 1
+                    self.hens[hid]["conf"] = det["conf"]
+
+                # Increment lost for any track not matched in this AI cycle
+                for hid, hdata in self.hens.items():
+                    if hid not in used_hens:
+                        hdata["lost"] += 1
+
+                # Stage 2: Register New Hen entering the zone (Unique IDs, zero repeats!)
+                min_new_dist = 36.0
+                unmatched_fresh = [det for det_idx, det in enumerate(fresh) if det_idx not in used_dets and det.get("conf", 0.0) >= 0.03]
+                unmatched_fresh.sort(key=lambda d: -d["center"][1])
+                for det in unmatched_fresh:
+                    cx, cy = det["center"]
+
+                    # Zone gate: only register inside the detection zone
+                    if not is_in_zone(cx, cy):
+                        continue
+
+                    # Only block if too close to a known tracked hen (prevents duplicate box on same comb)
+                    is_near_active = any(
+                        math.hypot(cx - h["center"][0], cy - h["center"][1]) < min_new_dist or _box_iou(det["box"], h["box"]) > 0.25
+                        for h in self.hens.values() if h["lost"] <= 45
+                    )
+                    if is_near_active:
+                        continue
+
+                    # Truly new hen entered the zone: assign a new unique ID! Never repeat!
+                    hid = self.next_hen_number
+                    self.next_hen_number += 1
+                    self.hens[hid] = {
+                        "box": list(det["box"]),
+                        "center": (cx, cy),
+                        "velocity": (0.0, 0.0),
+                        "lost": 0,
+                        "hits": 1,
+                        "conf": det["conf"]
+                    }
+                    used_hens.add(hid)
+
+            # IMMEDIATE RETIREMENT: When a hen actually leaves the zone or is lost too long
+            # When a hen leaves the zone, its box vanishes immediately and ID is permanently preserved!
+            z = getattr(self, '_zone', None)
+            for hid in list(self.hens.keys()):
+                b = self.hens[hid]["box"]
+                cx, cy = self.hens[hid]["center"]
+                left_zone = (z is not None and not (z[0] <= cx <= z[2] and z[1] <= cy <= z[3]))
+                lost_too_long = self.hens[hid]["lost"] > 45
+                is_out_of_bounds = (b[2] < 0 or b[0] > fw or b[3] < 0 or b[1] > fh)
+                if left_zone or lost_too_long or is_out_of_bounds:
+                    del self.hens[hid]
+
+            # ─── 3. Submit frame to AI worker if idle ───
+            with self.ai_lock:
+                if self.ai_frame is None and self.ai_results is None:
+                    self.ai_frame = frame.copy()
+
+            # ZONE FILTER: Only display boxes while the hen's head/comb is actively detected inside the detection zone
+            # When a hen leaves the zone, its detection box disappears immediately ("poiruranum")
+            z = getattr(self, '_zone', None)
+            candidates = [
+                hid for hid, d in self.hens.items()
+                if d["lost"] <= 2 and d.get("hits", 0) >= 1 and (z is None or (z[0] <= d["center"][0] <= z[2] and z[1] <= d["center"][1] <= z[3])) and d["box"][1] > 6
+            ]
+            candidates.sort(key=lambda hid: (-self.hens[hid].get("hits", 0), self.hens[hid]["lost"]))
+
+            visible_hens = []
+            for hid in candidates:
+                b1 = self.hens[hid]["box"]
+                c1 = self.hens[hid]["center"]
+                diag1 = math.hypot(b1[2] - b1[0], b1[3] - b1[1])
                 is_duplicate = False
-                for existing in detections:
-                    ex1, ey1, ex2, ey2 = existing["box"]
-                    ix1, iy1 = max(rx1, ex1), max(ry1, ey1)
-                    ix2, iy2 = min(rx2, ex2), min(ry2, ey2)
-                    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
-                    inter_area = iw * ih
-                    union_area = (rx2 - rx1) * (ry2 - ry1) + (ex2 - ex1) * (ey2 - ey1) - inter_area
-                    if union_area > 0 and (inter_area / union_area) > 0.45:
+                for kept_id in visible_hens:
+                    b2 = self.hens[kept_id]["box"]
+                    c2 = self.hens[kept_id]["center"]
+                    diag2 = math.hypot(b2[2] - b2[0], b2[3] - b2[1])
+
+                    if math.hypot(c1[0] - c2[0], c1[1] - c2[1]) < min(diag1, diag2) * 0.35:
                         is_duplicate = True
                         break
+
+                    ix1, iy1 = max(b1[0], b2[0]), max(b1[1], b2[1])
+                    ix2, iy2 = min(b1[2], b2[2]), min(b1[3], b2[3])
+                    iw = max(0, ix2 - ix1)
+                    ih = max(0, iy2 - iy1)
+                    inter = iw * ih
+                    union = (b1[2] - b1[0]) * (b1[3] - b1[1]) + (b2[2] - b2[0]) * (b2[3] - b2[1]) - inter
+                    if union > 0 and (inter / union) > 0.45:
+                        is_duplicate = True
+                        break
+
                 if not is_duplicate:
-                    detections.append(r_det)
+                    visible_hens.append(hid)
 
-            # Spatial sort on frame 1 so initial labels start 1, 2, 3 in natural sequence
-            if frame_number <= 1:
-                detections.sort(key=lambda d: d["center"][1] * 2.0 + d["center"][0])
+            # Total counted = total unique sequential hens registered in zone
+            self.max_total_hens = max(self.max_total_hens, self.next_hen_number - 1)
 
-            with self.state_lock:
-                # ─── 3. Mutual Nearest Neighbor (MNN) Matching ───
-                MAX_MATCH_DIST = 200.0
-                det_to_hen = {}
-                for d_idx, det in enumerate(detections):
-                    cx, cy = det["center"]
-                    best_num, best_dist = None, float("inf")
-                    for num, data in self.hens.items():
-                        if data["lost_frames"] > 45: continue
-                        hx, hy = data["center"]
-                        d = math.hypot(cx - hx, cy - hy)
-                        if d <= MAX_MATCH_DIST and d < best_dist:
-                            best_dist = d
-                            best_num = num
-                    if best_num is not None:
-                        det_to_hen[d_idx] = (best_num, best_dist)
+            out_detections = []
+            for hid in visible_hens:
+                d = self.hens[hid]
+                b = d["box"]
+                x1 = int(max(0, min(fw - 1, b[0])))
+                y1 = int(max(0, min(fh - 1, b[1])))
+                x2 = int(max(0, min(fw - 1, b[2])))
+                y2 = int(max(0, min(fh - 1, b[3])))
+                if x2 - x1 < 2 or y2 - y1 < 2:
+                    continue
+                vx, vy = d.get("velocity", (0.0, 0.0))
+                out_detections.append({
+                    "hen_number": hid,
+                    "box": [x1, y1, x2, y2],
+                    "confidence": float(round(d.get("conf", 0.85), 2)),
+                    "velocity": [float(round(vx, 2)), float(round(vy, 2))],
+                    "track_id": hid,
+                    "predicted": False
+                })
 
-                hen_to_det = {}
-                for num, data in self.hens.items():
-                    if data["lost_frames"] > 45: continue
-                    hx, hy = data["center"]
-                    best_d_idx, best_dist = None, float("inf")
-                    for d_idx, det in enumerate(detections):
-                        d = math.hypot(det["center"][0] - hx, det["center"][1] - hy)
-                        if d <= MAX_MATCH_DIST and d < best_dist:
-                            best_dist = d
-                            best_d_idx = d_idx
-                    if best_d_idx is not None:
-                        hen_to_det[num] = (best_d_idx, best_dist)
+            # Strictly sort by sequential hen_number: 1, 2, 3, 4, 5...
+            out_detections.sort(key=lambda d: d["hen_number"])
 
-                matched_dets = set()
-                used_hens = set()
-                out_detections = []
-                EMA_ALPHA = 0.90
+            self.latest_detections = out_detections
+            elapsed = time.time() - started
+            fps = 1.0 / max(0.001, elapsed)
 
-                # Accept ONLY mutual matches
-                for d_idx, (num, dist) in det_to_hen.items():
-                    if num in hen_to_det and hen_to_det[num][0] == d_idx:
-                        matched_dets.add(d_idx)
-                        used_hens.add(num)
-                        det = detections[d_idx]
-                        center = det["center"]
-                        raw_box = det["box"]
-                        data = self.hens[num]
-
-                        old_cx, old_cy = data["center"]
-                        data["velocity"] = (center[0] - old_cx, center[1] - old_cy)
-                        data["center"] = center
-                        data["lost_frames"] = 0
-                        data["seen"] = True
-                        data["hits"] = data.get("hits", 1) + 1
-                        data["size"] = det["size"]
-
-                        sb = data.get("smooth_box", [float(v) for v in raw_box])
-                        data["smooth_box"] = [
-                            EMA_ALPHA * raw_box[i] + (1 - EMA_ALPHA) * sb[i]
-                            for i in range(4)
-                        ]
-                        det["hen_number"] = num
-
-                        sb = data["smooth_box"]
-                        out_detections.append({
-                            "hen_number": num,
-                            "box": [int(sb[0]), int(sb[1]), int(sb[2]), int(sb[3])],
-                            "confidence": det["conf"],
-                            "track_id": num,
-                            "predicted": False
-                        })
-
-                # ─── 4. Unmatched Detections (Re-attach or Brand New Number) ───
-                for d_idx, det in enumerate(detections):
-                    if d_idx in matched_dets:
-                        continue
-                    center = det["center"]
-                    raw_box = det["box"]
-
-                    reassigned_num = None
-                    closest_dist = float("inf")
-                    for num, data in self.hens.items():
-                        if num in used_hens or data["lost_frames"] > 45: continue
-                        d = math.hypot(center[0] - data["center"][0], center[1] - data["center"][1])
-                        if d <= 200.0 and d < closest_dist:
-                            closest_dist = d
-                            reassigned_num = num
-
-                    if reassigned_num is not None:
-                        num = reassigned_num
-                        data = self.hens[num]
-                        data["center"] = center
-                        data["lost_frames"] = 0
-                        data["seen"] = True
-                        data["hits"] = data.get("hits", 1) + 1
-                        data["smooth_box"] = [float(v) for v in raw_box]
-                    else:
-                        num = self.next_hen_number
-                        self.next_hen_number += 1
-                        self.hens[num] = {
-                            "center": center,
-                            "velocity": (0.0, 0.0),
-                            "lost_frames": 0,
-                            "seen": True,
-                            "hits": 1,
-                            "size": det["size"],
-                            "smooth_box": [float(v) for v in raw_box],
-                        }
-
-                    used_hens.add(num)
-                    det["hen_number"] = num
-
-                    sb = self.hens[num]["smooth_box"]
-                    out_detections.append({
-                        "hen_number": num,
-                        "box": [int(sb[0]), int(sb[1]), int(sb[2]), int(sb[3])],
-                        "confidence": det["conf"],
-                        "track_id": num,
-                        "predicted": False
-                    })
-
-                # 4. Predicted ghost boxes for briefly occluded hens (prevents visual flickering)
-                for num, data in self.hens.items():
-                    if num not in used_hens and 0 < data["lost_frames"] <= 25 and data.get("hits", 0) >= 2:
-                        lost = data["lost_frames"]
-                        sb = data.get("smooth_box")
-                        if sb:
-                            vx, vy = data.get("velocity", (0, 0))
-                            pred_cx = (sb[0] + sb[2]) / 2 + vx * min(lost, 8)
-                            pred_cy = (sb[1] + sb[3]) / 2 + vy * min(lost, 8)
-                            bw = sb[2] - sb[0]
-                            bh = sb[3] - sb[1]
-                            x1 = int(pred_cx - bw / 2)
-                            y1 = int(pred_cy - bh / 2)
-                            x2 = int(pred_cx + bw / 2)
-                            y2 = int(pred_cy + bh / 2)
-                            out_detections.append({
-                                "hen_number": num,
-                                "box": [x1, y1, x2, y2],
-                                "confidence": 0.0,
-                                "track_id": data.get("track_id"),
-                                "predicted": True
-                            })
-
-                elapsed = time.time() - started
-                if elapsed > 0:
-                    self.ai_fps = 1.0 / elapsed
-                
-                # Count verified established hens
-                verified_total = len([h for h in self.hens.values() if h.get("hits", 0) >= 1])
-
-                self.latest_detections = out_detections
-                self.latest_frame_number = frame_number
-                self.latest_video_time = video_time
-                self.total_inference_count += 1
-                self.ai_error = None
-                    
             return {
-                "success": True, 
-                "busy": False, 
+                "success": True,
+                "busy": False,
                 "video_time": video_time,
-                "detections": self.latest_detections, 
-                "total_hens": verified_total,
-                "visible_hens": len(used_hens), 
+                "frame_width": fw,
+                "frame_height": fh,
+                "detections": out_detections,
+                "total_hens": self.max_total_hens,
+                "visible_hens": len(out_detections),
                 "ai_frames": self.total_inference_count,
-                "ai_fps": round(self.ai_fps, 2)
+                "ai_fps": round(fps, 1)
             }
-        except Exception as e:
-            traceback.print_exc()
-            self.ai_error = str(e)
-            return {"success": False, "error": str(e)}
-        finally:
-            self.inference_lock.release()

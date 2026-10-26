@@ -256,6 +256,88 @@ async def count_trays(
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
 
 
+@router.post("/live-egg-detect")
+async def live_egg_detect(
+    frame: UploadFile = File(None),
+    file: UploadFile = File(None),
+    image: UploadFile = File(None),
+    confidence_threshold: float = Form(0.35),
+    target: str = Form("trays"),
+):
+    """Ultra-fast live frame detection endpoint for real-time mobile camera scanner."""
+    actual_file = frame or file or image
+    if not actual_file:
+        raise HTTPException(status_code=400, detail="No frame provided")
+
+    raw = await actual_file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty frame")
+
+    try:
+        import numpy as np
+        import cv2
+        from app.ai.yolo_service import detect_objects_image
+
+        nparr = np.frombuffer(raw, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return {"success": False, "error": "Cannot decode frame"}
+
+        h, w = img.shape[:2]
+        result = detect_objects_image(img, conf_threshold=confidence_threshold)
+
+        # Filter detections based on target
+        filtered_detections = []
+        for det in result.get("detections", []):
+            label = det.get("class", "").lower()
+            if target == "trays" and ("tray" in label or "egg" in label):
+                filtered_detections.append(det)
+            elif target == "hens" and "hen" in label:
+                filtered_detections.append(det)
+            elif target == "eggs" and "egg" in label and "tray" not in label:
+                filtered_detections.append(det)
+
+        # Calculate counts
+        tray_count = sum(1 for d in filtered_detections if "tray" in d.get("class", "").lower())
+        detected_eggs = sum(1 for d in filtered_detections if "egg" in d.get("class", "").lower() and "tray" not in d.get("class", "").lower())
+
+        if target == "trays":
+            expected_eggs = tray_count * 30
+            egg_count = detected_eggs if detected_eggs > 0 else expected_eggs
+            missing_eggs = max(0, expected_eggs - detected_eggs) if (detected_eggs > 0 and expected_eggs > detected_eggs) else 0
+            hen_count = 0
+        elif target == "hens":
+            hen_count = len(filtered_detections)
+            tray_count = 0
+            egg_count = 0
+            expected_eggs = 0
+            missing_eggs = 0
+        else:
+            egg_count = len(filtered_detections)
+            tray_count = 0
+            hen_count = 0
+            expected_eggs = 0
+            missing_eggs = 0
+
+        return {
+            "success": True,
+            "tray_count": tray_count,
+            "egg_count": egg_count,
+            "hen_count": hen_count,
+            "expected_egg_count": expected_eggs,
+            "missing_egg_count": missing_eggs,
+            "confidence": result.get("confidence", 0.0),
+            "detections": filtered_detections,
+            "frame_width": w,
+            "frame_height": h,
+            "result_image": result.get("result_image", "")
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e), "detections": []}
+
+
 # ─── OpenAI Vision: Egg & Tray counting ──────────────────────────────────────
 
 # Allowed MIME types for the vision endpoint

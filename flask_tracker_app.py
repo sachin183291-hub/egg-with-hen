@@ -204,12 +204,21 @@ def run_tracker(input_video_path, output_video_path):
             confs = results[0].boxes.conf.cpu().numpy()
             tids = (results[0].boxes.id.int().cpu().tolist() if results[0].boxes.id is not None else [None] * len(boxes))
             
+            max_comb_w = int(w * 0.09) if w > 900 else int(w * 0.10)
+            max_comb_h = int(h * 0.15) if h > 900 else int(h * 0.16)
+            max_area = max_comb_w * max_comb_h
+
             for box, conf, tid in zip(boxes, confs, tids):
                 x1, y1, x2, y2 = map(int, box)
+                bw, bh = x2 - x1, y2 - y1
+                if bw < 6 or bh < 6:
+                    continue
+                if bw > max_comb_w or bh > max_comb_h or (bw * bh) > max_area:
+                    continue
                 detections.append({
                     "box": (x1, y1, x2, y2),
                     "center": ((x1+x2)/2.0, (y1+y2)/2.0),
-                    "size": (x2-x1, y2-y1),
+                    "size": (bw, bh),
                     "tid": tid,
                     "conf": float(conf)
                 })

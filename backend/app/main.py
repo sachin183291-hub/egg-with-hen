@@ -4,13 +4,18 @@ FastAPI Backend Application
 """
 import os
 import tempfile
-# Low-memory & cloud environment optimizations (Render free tier 512MB RAM)
+# Multi-threading optimization (set to 1 thread only in Render free tier 512MB RAM)
 os.environ.setdefault("YOLO_CONFIG_DIR", os.path.join(tempfile.gettempdir(), "Ultralytics"))
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
-os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+if os.environ.get("RENDER") == "true":
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+    os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+else:
+    os.environ.setdefault("OMP_NUM_THREADS", "4")
+    os.environ.setdefault("MKL_NUM_THREADS", "4")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")
 
 from pathlib import Path
 # pyrefly: ignore [missing-import]

@@ -1,7 +1,8 @@
+# ByteTrack configuration for Hen Comb Tracking
 tracker_type: bytetrack
-track_high_thresh: 0.05
-track_low_thresh: 0.02
-new_track_thresh: 0.05
-track_buffer: 60
-match_thresh: 0.8
+track_high_thresh: 0.15
+track_low_thresh: 0.05
+new_track_thresh: 0.25
+track_buffer: 180
+match_thresh: 0.35
 fuse_score: True

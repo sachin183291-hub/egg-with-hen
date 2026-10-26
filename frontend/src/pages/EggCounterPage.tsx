@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { aiApi } from '../services/api'
 import {
@@ -11,6 +11,8 @@ import {
   Sparkles,
   Camera,
   X,
+  RefreshCw,
+  Zap,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -89,83 +91,440 @@ export default function EggCounterPage() {
   const [threshold, setThreshold] = useState(0.35)
   const [eggCost, setEggCost] = useState<number>(0)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const [cameraLoading, setCameraLoading] = useState(false)
+  const [liveStats, setLiveStats] = useState({
+    egg_count: 0,
+    tray_count: 0,
+    hen_count: 0,
+    expected_egg_count: 0,
+    missing_egg_count: 0,
+    confidence: 0,
+  })
+  const [liveDetections, setLiveDetections] = useState<any[]>([])
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const isDetectingRef = useRef(false)
+  const animFrameIdRef = useRef<number | null>(null)
+  const lastDetectionsRef = useRef<any[]>([])
+  const lastResultImageRef = useRef<string>('')
+  const lastStatsRef = useRef(liveStats)
+  const targetRef = useRef(target)
+  const thresholdRef = useRef(threshold)
+  const isCameraOpenRef = useRef(false)
 
-  const stopCamera = () => {
+  useEffect(() => {
+    targetRef.current = target
+  }, [target])
+
+  useEffect(() => {
+    thresholdRef.current = threshold
+  }, [threshold])
+
+  useEffect(() => {
+    return () => {
+      stopCamera()
+    }
+  }, [])
+
+  const stopCameraStreamOnly = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
       streamRef.current = null
     }
-    setIsCameraOpen(false)
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
   }
 
-  const startCamera = async () => {
+  const stopCamera = () => {
+    isCameraOpenRef.current = false
+    if (animFrameIdRef.current) {
+      cancelAnimationFrame(animFrameIdRef.current)
+      animFrameIdRef.current = null
+    }
+    stopCameraStreamOnly()
+    setIsCameraOpen(false)
+    setCameraLoading(false)
+  }
+
+  const getCameraStream = async (desiredFacing: 'environment' | 'user' = 'environment') => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Camera access is not supported in this browser. Ensure you are using HTTPS.')
+    }
+
+    if (desiredFacing === 'environment') {
+      // 1. Try finding back/rear camera via deviceId enumeration
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const videoDevices = devices.filter(d => d.kind === 'videoinput')
+        const backDevice = videoDevices.find(d => /back|rear|environment|world|facing back|camera2 0/i.test(d.label))
+          || (videoDevices.length > 1 ? videoDevices[videoDevices.length - 1] : null)
+
+        if (backDevice && backDevice.deviceId) {
+          try {
+            return await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: { exact: backDevice.deviceId },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+              },
+              audio: false
+            })
+          } catch (e) {
+            console.warn('getUserMedia exact deviceId failed, falling back:', e)
+          }
+        }
+      } catch (enumErr) {
+        console.warn('enumerateDevices failed:', enumErr)
+      }
+
+      // 2. Try exact environment constraint
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { exact: 'environment' },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          },
+          audio: false
+        })
+      } catch (exactErr) {
+        console.warn('exact environment facingMode failed, trying ideal:', exactErr)
+      }
+
+      // 3. Try ideal environment
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        })
+      } catch (idealErr) {
+        console.warn('ideal environment facingMode failed:', idealErr)
+      }
+    } else {
+      // Front camera requested
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        })
+      } catch (userErr) {
+        console.warn('user facingMode failed:', userErr)
+      }
+    }
+
+    // Fallback to default video
+    return await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+  }
+
+  const drawOverlay = () => {
+    const video = videoRef.current
+    const canvas = overlayCanvasRef.current
+    if (!video || !canvas || video.readyState < 2) return
+
+    const displayW = canvas.clientWidth || video.clientWidth
+    const displayH = canvas.clientHeight || video.clientHeight
+    if (canvas.width !== displayW || canvas.height !== displayH) {
+      canvas.width = displayW
+      canvas.height = displayH
+    }
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.clearRect(0, 0, displayW, displayH)
+
+    const videoW = video.videoWidth || 640
+    const videoH = video.videoHeight || 480
+
+    // Map object-fit: cover coordinates
+    const scale = Math.max(displayW / videoW, displayH / videoH)
+    const offsetX = (displayW - videoW * scale) / 2
+    const offsetY = (displayH - videoH * scale) / 2
+
+    const detections = lastDetectionsRef.current || []
+
+    for (const det of detections) {
+      const bbox = det.bbox || []
+      if (bbox.length < 4) continue
+      const [x1, y1, x2, y2] = bbox
+
+      const sx = x1 * scale + offsetX
+      const sy = y1 * scale + offsetY
+      const sw = (x2 - x1) * scale
+      const sh = (y2 - y1) * scale
+
+      const isTray = (det.class || '').includes('tray')
+      const isHen = (det.class || '').includes('hen')
+
+      const boxColor = isTray ? '#06b6d4' : (isHen ? '#ef4444' : '#f59e0b')
+      const labelBg = isTray ? 'rgba(6, 182, 212, 0.9)' : (isHen ? 'rgba(239, 68, 68, 0.9)' : 'rgba(245, 158, 11, 0.9)')
+      const labelText = isTray
+        ? `TRAY #${det.id || 1} (30 Eggs)`
+        : (isHen ? `HEN #${det.id || 1}` : `EGG #${det.id || 1} ${Math.round((det.confidence || 0) * 100)}%`)
+
+      ctx.save()
+      ctx.shadowColor = boxColor
+      ctx.shadowBlur = 8
+      ctx.strokeStyle = boxColor
+      ctx.lineWidth = Math.max(2, Math.min(4, displayW / 200))
+
+      if (typeof ctx.roundRect === 'function') {
+        ctx.beginPath()
+        ctx.roundRect(sx, sy, sw, sh, 6)
+        ctx.stroke()
+      } else {
+        ctx.strokeRect(sx, sy, sw, sh)
+      }
+
+      // Draw corner brackets
+      const bracketLen = Math.min(16, sw / 3, sh / 3)
+      ctx.lineWidth = Math.max(3, ctx.lineWidth + 1)
+      ctx.beginPath()
+      ctx.moveTo(sx, sy + bracketLen)
+      ctx.lineTo(sx, sy)
+      ctx.lineTo(sx + bracketLen, sy)
+      ctx.moveTo(sx + sw - bracketLen, sy)
+      ctx.lineTo(sx + sw, sy)
+      ctx.lineTo(sx + sw, sy + bracketLen)
+      ctx.moveTo(sx, sy + sh - bracketLen)
+      ctx.lineTo(sx, sy + sh)
+      ctx.lineTo(sx + bracketLen, sy + sh)
+      ctx.moveTo(sx + sw - bracketLen, sy + sh)
+      ctx.lineTo(sx + sw, sy + sh)
+      ctx.lineTo(sx + sw, sy + sh - bracketLen)
+      ctx.stroke()
+
+      // Tag Label
+      ctx.shadowBlur = 0
+      ctx.fillStyle = labelBg
+      const fontSize = Math.max(11, Math.min(14, Math.round(displayW / 35)))
+      ctx.font = `bold ${fontSize}px sans-serif`
+      const textWidth = ctx.measureText(labelText).width
+      const tagH = fontSize + 8
+      const tagY = sy > tagH + 4 ? sy - tagH - 2 : sy + 4
+
+      ctx.fillRect(sx, tagY, textWidth + 12, tagH)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(labelText, sx + 6, tagY + fontSize + 1)
+
+      ctx.restore()
+    }
+  }
+
+  const sendFrameForDetection = async () => {
+    if (isDetectingRef.current || !isCameraOpenRef.current) return
+    const video = videoRef.current
+    if (!video || video.readyState < 2 || video.paused || video.ended) return
+
+    isDetectingRef.current = true
+
+    try {
+      // Downscale frame to ~640px for ultra-low latency inference
+      const origW = video.videoWidth || 640
+      const origH = video.videoHeight || 480
+      const scale = Math.min(1, 640 / origW)
+      const w = Math.round(origW * scale)
+      const h = Math.round(origH * scale)
+
+      if (!canvasRef.current) return
+      const canvas = canvasRef.current
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(video, 0, 0, w, h)
+
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', 0.65))
+      if (!blob) return
+
+      const formData = new FormData()
+      formData.append('frame', blob, 'frame.jpg')
+      formData.append('confidence_threshold', String(thresholdRef.current))
+      formData.append('target', targetRef.current)
+
+      const resp = await aiApi.liveEggDetect(formData)
+      const data = resp.data
+
+      if (data && data.success) {
+        const normFactor = scale > 0 ? (1 / scale) : 1
+        const normalizedDets = (data.detections || []).map((d: any) => {
+          if (!d.bbox || d.bbox.length < 4) return d
+          return {
+            ...d,
+            bbox: [
+              d.bbox[0] * normFactor,
+              d.bbox[1] * normFactor,
+              d.bbox[2] * normFactor,
+              d.bbox[3] * normFactor,
+            ]
+          }
+        })
+        lastDetectionsRef.current = normalizedDets
+        if (data.result_image) {
+          lastResultImageRef.current = data.result_image
+        }
+        const newStats = {
+          egg_count: data.egg_count || 0,
+          tray_count: data.tray_count || 0,
+          hen_count: data.hen_count || 0,
+          expected_egg_count: data.expected_egg_count || 0,
+          missing_egg_count: data.missing_egg_count || 0,
+          confidence: data.confidence || 0,
+        }
+        lastStatsRef.current = newStats
+        setLiveStats(newStats)
+        setLiveDetections(data.detections || [])
+      }
+    } catch (err) {
+      console.debug('live detect tick error:', err)
+    } finally {
+      isDetectingRef.current = false
+    }
+  }
+
+  const startLiveDetectionLoop = () => {
+    let lastSendTime = 0
+    const SEND_INTERVAL = 280
+
+    const tick = (now: number) => {
+      if (!isCameraOpenRef.current) return
+
+      drawOverlay()
+
+      if (now - lastSendTime >= SEND_INTERVAL) {
+        lastSendTime = now
+        sendFrameForDetection()
+      }
+
+      animFrameIdRef.current = requestAnimationFrame(tick)
+    }
+
+    animFrameIdRef.current = requestAnimationFrame(tick)
+  }
+
+  const startCamera = async (targetFacing: 'environment' | 'user' = 'environment') => {
     setOpenaiResult(null)
     setYoloResult(null)
     setError(null)
     setStatus(null)
+    setCameraLoading(true)
+    setFacingMode(targetFacing)
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setError('Camera access is not supported in this browser. Ensure you are using HTTPS. Falling back to native camera.')
       cameraInputRef.current?.click()
+      setCameraLoading(false)
       return
     }
 
     try {
-      let stream;
-      try {
-        // Try environment (back) camera first for mobile
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } })
-      } catch (err) {
-        // Fallback to default camera (for desktop webcams)
-        stream = await navigator.mediaDevices.getUserMedia({ video: true })
-      }
+      stopCameraStreamOnly()
+      const stream = await getCameraStream(targetFacing)
       streamRef.current = stream
+      isCameraOpenRef.current = true
       setIsCameraOpen(true)
-      // We need to wait a tick for the video element to render before attaching the stream
+
       setTimeout(() => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream
-          videoRef.current.play()
+          videoRef.current.play().catch(e => console.warn('play error:', e))
+          videoRef.current.onloadedmetadata = () => {
+            setCameraLoading(false)
+            startLiveDetectionLoop()
+          }
+          if (videoRef.current.readyState >= 2) {
+            setCameraLoading(false)
+            startLiveDetectionLoop()
+          }
         }
-      }, 100)
+      }, 150)
     } catch (err: any) {
       console.error('Camera access denied:', err)
-      setError('Camera access denied or no camera found. Please allow permissions in your browser.')
+      setError('Could not access back camera (' + (err.message || 'Permission denied') + '). Please ensure camera permissions are allowed.')
+      setIsCameraOpen(false)
+      isCameraOpenRef.current = false
+      setCameraLoading(false)
+    }
+  }
+
+  const handleFlipCamera = async () => {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment'
+    setFacingMode(nextFacing)
+    setCameraLoading(true)
+    stopCameraStreamOnly()
+    try {
+      const stream = await getCameraStream(nextFacing)
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play().catch(e => console.warn(e))
+      }
+    } catch (e: any) {
+      console.warn('Flip camera failed:', e)
+    } finally {
+      setCameraLoading(false)
     }
   }
 
   const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current
-      const canvas = canvasRef.current
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const file = new File([blob], `camera_capture_${Date.now()}.jpg`, { type: 'image/jpeg' })
-            if (activeUploadContext === 'top') {
-              setTopFile(file)
-              setTopPreviewUrl(URL.createObjectURL(file))
-            } else if (activeUploadContext === 'side') {
-              setSideFile(file)
-              setSidePreviewUrl(URL.createObjectURL(file))
-            } else {
-              setSelectedFile(file)
-              setPreviewUrl(URL.createObjectURL(file))
-            }
-            stopCamera()
-          }
-        }, 'image/jpeg', 0.9)
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas) return
+
+    canvas.width = video.videoWidth || 1280
+    canvas.height = video.videoHeight || 720
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const file = new File([blob], `camera_scan_${Date.now()}.jpg`, { type: 'image/jpeg' })
+
+      if (mode === 'dual_ai') {
+        if (activeUploadContext === 'top') {
+          setTopFile(file)
+          setTopPreviewUrl(URL.createObjectURL(file))
+        } else {
+          setSideFile(file)
+          setSidePreviewUrl(URL.createObjectURL(file))
+        }
+      } else {
+        setSelectedFile(file)
+        setPreviewUrl(URL.createObjectURL(file))
+
+        const stats = lastStatsRef.current
+        setYoloResult({
+          success: true,
+          tray_count: stats.tray_count,
+          egg_count: stats.egg_count,
+          expected_egg_count: stats.expected_egg_count,
+          missing_egg_count: stats.missing_egg_count,
+          hen_count: stats.hen_count,
+          confidence: stats.confidence || 0.85,
+          detections: lastDetectionsRef.current,
+          result_image: lastResultImageRef.current || ''
+        })
+        setOpenaiResult(null)
+        setStatus(`Live Capture Complete! ${stats.egg_count} eggs detected.`)
       }
-    }
+      stopCamera()
+    }, 'image/jpeg', 0.92)
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -273,6 +632,330 @@ export default function EggCounterPage() {
 
   return (
     <div className="page-container page-with-bg">
+      {/* ─── FULLSCREEN REAL-TIME AI SCANNER VIEW ─────────────────────────── */}
+      {isCameraOpen && (
+        <div
+          className="live-scanner-fullscreen"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 999999,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: '#000000',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Main Video Viewport with Overlay Canvas */}
+          <div
+            style={{
+              position: 'relative',
+              flex: 1,
+              width: '100%',
+              height: '100%',
+              overflow: 'hidden',
+            }}
+          >
+            <video
+              ref={videoRef}
+              playsInline
+              autoPlay
+              muted
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                display: 'block',
+              }}
+            />
+            <canvas
+              ref={overlayCanvasRef}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none',
+              }}
+            />
+
+            {/* Loading Indicator while switching / opening camera */}
+            {cameraLoading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(0,0,0,0.65)',
+                  backdropFilter: 'blur(4px)',
+                  color: '#ffffff',
+                  gap: 12,
+                  zIndex: 20,
+                }}
+              >
+                <Loader size={36} className="spinner" />
+                <span style={{ fontSize: '1rem', fontWeight: 600 }}>
+                  Connecting {facingMode === 'environment' ? 'Back' : 'Front'} Camera...
+                </span>
+              </div>
+            )}
+
+            {/* Top HUD Bar */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                padding: '16px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 70%, transparent 100%)',
+                zIndex: 10,
+              }}
+            >
+              {/* Status Pill */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 12px',
+                    borderRadius: 20,
+                    background: 'rgba(239, 68, 68, 0.25)',
+                    border: '1px solid #ef4444',
+                    color: '#fca5a5',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: '#ef4444',
+                      boxShadow: '0 0 8px #ef4444',
+                    }}
+                  />
+                  AI LIVE SCANNER
+                </span>
+
+                <span
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 20,
+                    background: 'rgba(255,255,255,0.15)',
+                    color: '#ffffff',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  {facingMode === 'environment' ? '📸 Back Cam' : '🤳 Front Cam'}
+                </span>
+              </div>
+
+              {/* Action Buttons: Flip & Close */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={handleFlipCamera}
+                  title="Switch Front/Back Camera"
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.2)',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <RefreshCw size={20} />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  title="Close Camera"
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: '50%',
+                    background: 'rgba(239, 68, 68, 0.3)',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(239, 68, 68, 0.5)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <X size={22} />
+                </button>
+              </div>
+            </div>
+
+            {/* Floating Live Detection Stats Pill (Center-Top) */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 76,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '8px 18px',
+                borderRadius: 24,
+                background: 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(245, 158, 11, 0.5)',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                color: '#ffffff',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: '1.25rem' }}>🥚</span>
+                <div>
+                  <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#f59e0b', lineHeight: 1.1 }}>
+                    {liveStats.egg_count} Eggs
+                  </div>
+                  <div style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase' }}>
+                    {liveStats.tray_count > 0 ? `${liveStats.tray_count} Trays Detected` : 'Scanning Live'}
+                  </div>
+                </div>
+              </div>
+
+              {liveStats.confidence > 0 && (
+                <div style={{ borderLeft: '1px solid rgba(255,255,255,0.2)', paddingLeft: 12 }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#10b981' }}>
+                    {Math.round(liveStats.confidence * 100)}%
+                  </div>
+                  <div style={{ fontSize: '0.65rem', color: '#94a3b8' }}>Confidence</div>
+                </div>
+              )}
+            </div>
+
+            {/* Target Mode Quick Switcher (Floating below stats) */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 136,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 10,
+                display: 'flex',
+                gap: 6,
+                padding: 4,
+                borderRadius: 20,
+                background: 'rgba(0,0,0,0.6)',
+                backdropFilter: 'blur(6px)',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              {(['trays', 'eggs', 'hens'] as DetectionTarget[]).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTarget(t)}
+                  style={{
+                    padding: '4px 12px',
+                    borderRadius: 16,
+                    border: 'none',
+                    fontSize: '0.75rem',
+                    fontWeight: target === t ? 700 : 500,
+                    background: target === t ? 'var(--brand-500, #3b82f6)' : 'transparent',
+                    color: target === t ? '#fff' : '#cbd5e1',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  {t === 'trays' ? '📦 Trays' : t === 'eggs' ? '🥚 Eggs' : '🐔 Hens'}
+                </button>
+              ))}
+            </div>
+
+            {/* Bottom HUD: Shutter / Capture Button & Controls */}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                padding: '24px 20px 36px 20px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 12,
+                background: 'linear-gradient(0deg, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.5) 60%, transparent 100%)',
+                zIndex: 10,
+              }}
+            >
+              <div style={{ fontSize: '0.85rem', color: '#e2e8f0', textAlign: 'center', textShadow: '0 2px 4px rgba(0,0,0,0.8)' }}>
+                Point at egg tray — AI detects continuously in real-time
+              </div>
+
+              {/* Shutter Button */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 24, width: '100%' }}>
+                <button
+                  type="button"
+                  onClick={capturePhoto}
+                  style={{
+                    width: 76,
+                    height: 76,
+                    borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.3)',
+                    border: '4px solid #ffffff',
+                    padding: 5,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 0 20px rgba(255,255,255,0.4)',
+                    transition: 'transform 0.15s ease',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      borderRadius: '50%',
+                      background: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#0f172a',
+                    }}
+                  >
+                    <Camera size={26} />
+                  </div>
+                </button>
+              </div>
+
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', textAlign: 'center' }}>
+                Tap Shutter to Capture & Save Count
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <header className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="page-icon-wrapper" style={{ background: 'var(--brand-500)' }}>
@@ -441,38 +1124,8 @@ export default function EggCounterPage() {
             style={{ display: 'none' }}
           />
 
-          {/* ─── Camera / Upload UI ──────────────────────────────────────────── */}
-          {isCameraOpen ? (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ position: 'relative', width: '100%', borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', marginBottom: 12 }}>
-                <video
-                  ref={videoRef}
-                  style={{ width: '100%', display: 'block' }}
-                  playsInline
-                  autoPlay
-                  muted
-                />
-              </div>
-              <canvas ref={canvasRef} style={{ display: 'none' }} />
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button
-                  className="btn btn-primary"
-                  onClick={capturePhoto}
-                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-                >
-                  <Camera size={18} /> Take Photo
-                </button>
-                <button
-                  className="btn btn-secondary"
-                  onClick={stopCamera}
-                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-                >
-                  <X size={18} /> Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
+          {/* Hidden helper canvas for frame capture */}
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
               {mode === 'dual_ai' ? (
                 <div className="dual-ai-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <label
@@ -550,23 +1203,37 @@ export default function EggCounterPage() {
                 </label>
               )}
 
-              {/* Camera capture button opens custom camera */}
+              {/* Live AI Camera Fullscreen Button */}
               <button
-                className="btn btn-secondary"
+                type="button"
+                className="btn btn-primary"
                 onClick={() => {
                   if (mode === 'dual_ai') {
                     setActiveUploadContext(topFile ? 'side' : 'top');
                   } else {
                     setActiveUploadContext('single');
                   }
-                  startCamera();
+                  startCamera('environment');
                 }}
-                style={{ width: '100%', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                style={{
+                  width: '100%',
+                  marginBottom: 24,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 10,
+                  padding: '14px 20px',
+                  fontSize: '1rem',
+                  fontWeight: 600,
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                  border: 'none',
+                  borderRadius: 10,
+                  color: '#ffffff',
+                }}
               >
-                <Camera size={16} /> {t('eggCounter.captureCamera')} {mode === 'dual_ai' ? (topFile ? '(Side View)' : '(Top View)') : ''}
+                <Camera size={20} /> Live AI Camera (Full Screen Back Camera) {mode === 'dual_ai' ? (topFile ? '(Side View)' : '(Top View)') : ''}
               </button>
-            </>
-          )}
 
           {mode === 'dual_ai' && (topFile || sideFile) && (
             <div style={{ marginBottom: 24 }}>

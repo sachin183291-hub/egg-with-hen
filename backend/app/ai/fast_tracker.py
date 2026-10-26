@@ -59,16 +59,18 @@ class FastHenTracker:
                              else [None] * len(boxes))
                     raw_dets = []
                     for box, conf, tid in zip(boxes, confs, tids):
-                        if conf < 0.15: continue
-                        x1, y1, x2, y2 = map(int, box)
-                        w, h = x2 - x1, y2 - y1
-                        if w <= 0 or h <= 0: continue
-                        if w > 150 or h > 150: continue 
+                        if conf < 0.06: continue
+                        x1, y1, x2, y2 = map(float, box)
+                        bw, bh = x2 - x1, y2 - y1
+                        if bw < 14 or bh < 14: continue
+                        max_comb_w = int(w * 0.09) if w > 900 else int(w * 0.10)
+                        max_comb_h = int(h * 0.15) if h > 900 else int(h * 0.16)
+                        if bw > max_comb_w or bh > max_comb_h or (bw * bh) > (max_comb_w * max_comb_h): continue
                         
                         raw_dets.append({
                             "box": (x1, y1, x2, y2),
                             "center": ((x1+x2)/2.0, (y1+y2)/2.0),
-                            "size": (w, h),
+                            "size": (bw, bh),
                             "tid": tid,
                             "conf": float(conf)
                         })
@@ -78,7 +80,16 @@ class FastHenTracker:
                         is_duplicate = False
                         for fd in detections:
                             dist = math.hypot(d["center"][0] - fd["center"][0], d["center"][1] - fd["center"][1])
-                            if dist < 80:
+                            # Check IoU
+                            ix1 = max(d["box"][0], fd["box"][0])
+                            iy1 = max(d["box"][1], fd["box"][1])
+                            ix2 = min(d["box"][2], fd["box"][2])
+                            iy2 = min(d["box"][3], fd["box"][3])
+                            inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+                            a1 = (d["box"][2] - d["box"][0]) * (d["box"][3] - d["box"][1])
+                            a2 = (fd["box"][2] - fd["box"][0]) * (fd["box"][3] - fd["box"][1])
+                            iou = inter / float(a1 + a2 - inter) if (a1 + a2 - inter) > 0 else 0
+                            if dist < 18 or iou > 0.45:
                                 is_duplicate = True
                                 break
                         if not is_duplicate:
@@ -143,45 +154,22 @@ class FastHenTracker:
                     used.add(asgn)
                     det["num"] = asgn
 
-                # Draw
+                # Draw matching track_028imnwx_output.mp4
                 display = frame.copy()
                 for det in detections:
                     num = det["num"]
                     sb = hens[num]["smooth_box"]
                     x1, y1, x2, y2 = int(sb[0]), int(sb[1]), int(sb[2]), int(sb[3])
+                    # Snug green box on comb
                     cv2.rectangle(display, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(display, f"C{num} {det['conf']:.0%}",
-                                (x1, max(y1-8, 12)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
-                    cv2.circle(display, (int((sb[0]+sb[2])/2), int((sb[1]+sb[3])/2)), 4, (0, 255, 0), -1)
+                    # Green ID text above the box
+                    cv2.putText(display, f"ID: {num}",
+                                (x1, max(y1 - 10, 15)), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 255, 0), 2)
 
-                for num, data in hens.items():
-                    if num not in used and 0 < data["lost"] <= 45:
-                        lost = data["lost"]
-                        vx, vy = data["vel"]
-                        sb = data.get("smooth_box")
-                        if sb:
-                            pcx = (sb[0]+sb[2])/2 + vx*min(lost, 15)
-                            pcy = (sb[1]+sb[3])/2 + vy*min(lost, 15)
-                            bw = sb[2]-sb[0]
-                            bh = sb[3]-sb[1]
-                        else:
-                            cx, cy = data["center"]
-                            pcx = cx + vx*min(lost, 15)
-                            pcy = cy + vy*min(lost, 15)
-                            bw, bh = data.get("size", (60, 60))
-                        x1, y1 = int(pcx - bw/2), int(pcy - bh/2)
-                        x2, y2 = int(pcx + bw/2), int(pcy + bh/2)
-                        fade = int(255 * max(0.2, 1.0 - lost/60.0))
-                        cv2.rectangle(display, (x1, y1), (x2, y2), (0, fade, 255), 1)
-
-                inf_fps = 1.0 / elapsed if elapsed > 0 else 0
-                fps_color = (0, 255, 0) if inf_fps >= fps_src else (0, 80, 255)
-
-                cv2.rectangle(display, (10, 10), (820, 80), (0, 0, 0), -1)
-                cv2.putText(display,
-                            f"Frame {frame_no}/{total_frames}  Det:{len(detections)}  Unique:{next_num-1}  "
-                            f"Inf:{inf_fps:.1f}fps",
-                            (18, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.8, fps_color, 2)
+                # Draw red Total Hens on top right
+                total_text = f"Total Hens: {next_num - 1}"
+                (tw, th), _ = cv2.getTextSize(total_text, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)
+                cv2.putText(display, total_text, (w - tw - 20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
                 out.write(display)
 

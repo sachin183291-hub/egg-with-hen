@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, UploadCloud, Video, RefreshCw, Layers } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Activity, UploadCloud, Video, RefreshCw, Layers, Maximize2, Minimize2, X, Scan } from 'lucide-react'
 
 export default function HenTrackingPage() {
   const [totalHens, setTotalHens] = useState(0)
@@ -9,6 +10,9 @@ export default function HenTrackingPage() {
   const [isLiveMode, setIsLiveMode] = useState(false)
   const [isCameraOpen, setIsCameraOpen] = useState(false)
   const [hasVideoUrl, setHasVideoUrl] = useState(false)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const [isFullScreen, setIsFullScreen] = useState(false)
+  const [fitMode, setFitMode] = useState<'cover' | 'contain'>('cover')
 
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const overlayRef = useRef<HTMLCanvasElement | null>(null)
@@ -23,13 +27,15 @@ export default function HenTrackingPage() {
   const animationIdRef = useRef<number | null>(null)
   const frameNumberRef = useRef(0)
   const lastSendRef = useRef(0)
+  const startTimeRef = useRef(0)
   
   const latestResultsRef = useRef<any[]>([])
   const latestResultTimeRef = useRef(0)
   const previousRef = useRef<any>({})
   const velocitiesRef = useRef<any>({})
+  const animBoxesRef = useRef<Map<number, [number, number, number, number]>>(new Map())
   
-  const SEND_FPS = 12
+  const SEND_FPS = 10
 
   useEffect(() => {
     captureRef.current = document.createElement('canvas')
@@ -148,14 +154,86 @@ export default function HenTrackingPage() {
     }
   }
 
-  const startCamera = async () => {
+  const getBackCameraStream = async (desiredFacing: 'environment' | 'user' = 'environment') => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Camera not supported in this browser. Ensure HTTPS is used.')
+    }
+
+    const isPortrait = window.innerHeight > window.innerWidth
+    const targetW = isPortrait ? 720 : 1280
+    const targetH = isPortrait ? 1280 : 720
+
+    if (desiredFacing === 'environment') {
+      // 1. Try finding rear/back camera via deviceId enumeration
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const videoDevices = devices.filter(d => d.kind === 'videoinput')
+        const backDevice = videoDevices.find(d => /back|rear|environment|world|facing back|camera2 0/i.test(d.label))
+          || (videoDevices.length > 1 ? videoDevices[videoDevices.length - 1] : null)
+
+        if (backDevice && backDevice.deviceId) {
+          try {
+            return await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: { exact: backDevice.deviceId },
+                width: { ideal: targetW },
+                height: { ideal: targetH }
+              },
+              audio: false
+            })
+          } catch (e) {
+            console.warn('getUserMedia exact deviceId failed:', e)
+          }
+        }
+      } catch (e) {
+        console.warn('enumerateDevices failed:', e)
+      }
+
+      // 2. Try exact environment constraint
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: 'environment' }, width: { ideal: targetW }, height: { ideal: targetH } },
+          audio: false
+        })
+      } catch (e) {
+        console.warn('exact environment facingMode failed:', e)
+      }
+
+      // 3. Fallback to ideal environment
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: targetW }, height: { ideal: targetH } },
+          audio: false
+        })
+      } catch (e) {
+        console.warn('ideal environment failed:', e)
+      }
+    } else {
+      // Front camera
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: targetW }, height: { ideal: targetH } },
+          audio: false
+        })
+      } catch (e) {
+        console.warn('user facingMode failed:', e)
+      }
+    }
+
+    // 4. Fallback to generic video
+    return await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+  }
+
+  const startCamera = async (targetFacing: 'environment' | 'user' = 'environment') => {
     stopCamera()
     resetLocal()
     setIsLiveMode(true)
-    setStatusText('📷 Opening Camera...')
+    setFacingMode(targetFacing)
+    startTimeRef.current = Date.now()
+    setStatusText('📷 Opening Back Camera...')
     try {
       await resetAIBackend()
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      const stream = await getBackCameraStream(targetFacing)
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.controls = false
@@ -176,6 +254,25 @@ export default function HenTrackingPage() {
       }
     } catch (err: any) {
       setStatusText('❌ Camera error: ' + err.message)
+    }
+  }
+
+  const handleFlipCamera = async () => {
+    const nextFacing = facingMode === 'environment' ? 'user' : 'environment'
+    setFacingMode(nextFacing)
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    try {
+      const stream = await getBackCameraStream(nextFacing)
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play().catch(e => console.warn(e))
+      }
+    } catch (e: any) {
+      console.warn('Flip camera failed:', e)
     }
   }
 
@@ -236,21 +333,34 @@ export default function HenTrackingPage() {
     sendingRef.current = true
 
     try {
-      capture.width = video.videoWidth
-      capture.height = video.videoHeight
+      // Standardize capture to max 480px for ultra-low latency mobile upload (prevents video freeze)
+      const maxDim = 480
+      let cw = video.videoWidth
+      let ch = video.videoHeight
+      if (Math.max(cw, ch) > maxDim) {
+        const s = maxDim / Math.max(cw, ch)
+        cw = Math.round(cw * s)
+        ch = Math.round(ch * s)
+      }
+      if (capture.width !== cw || capture.height !== ch) {
+        capture.width = cw
+        capture.height = ch
+      }
       const ctx = capture.getContext('2d')
-      ctx?.drawImage(video, 0, 0, capture.width, capture.height)
+      ctx?.drawImage(video, 0, 0, cw, ch)
       
-      const blob = await new Promise<Blob | null>(resolve => capture.toBlob(resolve, 'image/jpeg', 0.82))
+      const blob = await new Promise<Blob | null>(resolve => capture.toBlob(resolve, 'image/jpeg', 0.65))
       if (!blob) {
         sendingRef.current = false
         return
       }
 
+      const curTime = isLiveMode ? (Date.now() - startTimeRef.current) / 1000 : (video.currentTime || 0)
+
       const form = new FormData()
       form.append('frame', blob, 'frame.jpg')
       form.append('frame_number', String(number))
-      form.append('video_time', String(video.currentTime || 0))
+      form.append('video_time', String(curTime))
 
       const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
       const response = await fetch(`${apiUrl}/api/tracker/live_frame`, {
@@ -258,7 +368,7 @@ export default function HenTrackingPage() {
         body: form
       })
       const data = await response.json()
-      if (data.success) {
+      if (data && data.success && !data.busy) {
         updateResults(data)
       }
     } catch (e) {
@@ -269,126 +379,196 @@ export default function HenTrackingPage() {
   }
 
   const updateResults = (data: any) => {
-    const detections = data.detections || []
-    const video_time = Number(data.video_time || 0)
-    latestResultsRef.current = detections
-    latestResultTimeRef.current = video_time
-    
-    setTotalHens(data.total_hens || 0)
-    setVisibleHens(data.visible_hens || detections.length)
-    setStatusText(`🟢 AI LIVE | UNIQUE HENS: ${data.total_hens || 0}`)
+    const rawDets = data.detections || []
+    const fw = Number(data.frame_width) || 1
+    const fh = Number(data.frame_height) || 1
 
-    const newPrevious: any = {}
-    const newVelocities: any = {}
-
-    for (const item of detections) {
-      const number = item.hen_number
-      const box = item.box
-      const old = previousRef.current[number]
-      let vx = 0
-      let vy = 0
-
-      if (old && video_time > old.time) {
-        const dt = Math.max(0.001, video_time - old.time)
-        const oldCX = (old.box[0] + old.box[2]) / 2
-        const oldCY = (old.box[1] + old.box[3]) / 2
-        const newCX = (box[0] + box[2]) / 2
-        const newCY = (box[1] + box[3]) / 2
-        vx = (newCX - oldCX) / dt
-        vy = (newCY - oldCY) / dt
-        vx = Math.max(-2500, Math.min(2500, vx))
-        vy = Math.max(-2500, Math.min(2500, vy))
+    const detections = rawDets.map((item: any) => {
+      const b = item.box || [0, 0, 0, 0]
+      return {
+        ...item,
+        normBox: [
+          b[0] / fw,
+          b[1] / fh,
+          b[2] / fw,
+          b[3] / fh
+        ]
       }
-      newPrevious[number] = { box, time: video_time }
-      newVelocities[number] = { vx, vy }
+    })
+
+    detections.sort((a: any, b: any) => (a.hen_number || 0) - (b.hen_number || 0))
+
+    // Always update latest results: if a hen leaves or is no longer detected, it disappears immediately!
+    latestResultsRef.current = detections
+    latestResultTimeRef.current = performance.now()
+
+    if (data.total_hens !== undefined) {
+      setTotalHens(prev => Math.max(prev, Number(data.total_hens || 0), detections.length))
     }
-    previousRef.current = newPrevious
-    velocitiesRef.current = newVelocities
+    setVisibleHens(detections.length)
+    setStatusText(`🟢 AI LIVE | UNIQUE HENS: ${Math.max(Number(data.total_hens || 0), detections.length)}`)
+
+    // Clean up animBoxesRef for any hen that is no longer in detections
+    const currentIds = new Set(detections.map((d: any) => Number(d.hen_number) || 0))
+    for (const id of Array.from(animBoxesRef.current.keys())) {
+      if (!currentIds.has(id)) {
+        animBoxesRef.current.delete(id)
+      }
+    }
   }
 
   const draw = () => {
     const video = videoRef.current
     const overlay = overlayRef.current
-    if (!video || !overlay) return
-    
-    if (overlay.width !== video.clientWidth || overlay.height !== video.clientHeight) {
-      overlay.width = video.clientWidth
-      overlay.height = video.clientHeight
+    if (!video || !overlay || !video.videoWidth || !video.videoHeight) return
+
+    const cw = overlay.clientWidth || window.innerWidth
+    const ch = overlay.clientHeight || window.innerHeight
+
+    if (overlay.width !== cw || overlay.height !== ch) {
+      overlay.width = cw
+      overlay.height = ch
     }
-    
+
     const ctx = overlay.getContext('2d')
     if (!ctx) return
-    ctx.clearRect(0, 0, overlay.width, overlay.height)
+    ctx.clearRect(0, 0, cw, ch)
 
-    const detections = latestResultsRef.current
-    if (!detections.length || !video.videoWidth) return
-
-    const rect = contentRect()
-    const sx = rect.width / video.videoWidth
-    const sy = rect.height / video.videoHeight
-    const age = Math.min(0.50, Math.max(0, (video.currentTime || 0) - latestResultTimeRef.current))
-
-    let visibleCount = 0
-
-    // Draw bounding boxes
-    for (const item of detections) {
-      let box = [...item.box]
-      const velocity = velocitiesRef.current[item.hen_number]
-      
-      if (velocity && age > 0) {
-        box[0] += velocity.vx * age
-        box[1] += velocity.vy * age
-        box[2] += velocity.vx * age
-        box[3] += velocity.vy * age
-      }
-
-      const x = rect.x + box[0] * sx
-      const y = rect.y + box[1] * sy
-      const width = (box[2] - box[0]) * sx
-      const height = (box[3] - box[1]) * sy
-
-      if (width <= 0 || height <= 0) continue
-      
-      visibleCount++
-
-      // Draw box
-      ctx.strokeStyle = item.predicted ? '#ffa500' : '#00ff00' // Orange for predicted, Green for normal
-      ctx.lineWidth = item.predicted ? 2 : 3
-      ctx.strokeRect(x, y, width, height)
-
-      // Draw label
-      const label = item.predicted ? `HEN ${item.hen_number} (P)` : `HEN ${item.hen_number}`
-      ctx.font = 'bold 15px Arial'
-      const textWidth = ctx.measureText(label).width
-      const labelY = Math.max(0, y - 22)
-      
-      ctx.fillStyle = item.predicted ? '#ffa500' : '#00ff00'
-      ctx.fillRect(x, labelY, textWidth + 10, 22)
-      
-      ctx.fillStyle = '#000000'
-      ctx.fillText(label, x + 5, labelY + 16)
+    const detections = latestResultsRef.current || []
+    if (performance.now() - latestResultTimeRef.current > 1200) {
+      latestResultsRef.current = []
+      animBoxesRef.current.clear()
     }
 
-    // Draw the Black Info Panel exactly like the video
-    // Scale panel size based on video width for responsiveness
-    const scale = Math.max(0.6, rect.width / 1280)
-    
-    ctx.fillStyle = '#000000' // Black background
-    ctx.fillRect(rect.x + 20 * scale, rect.y + 20 * scale, 350 * scale, 150 * scale)
+    const vw = video.videoWidth
+    const vh = video.videoHeight
 
-    // TIME
-    ctx.font = `bold ${24 * scale}px Arial`
-    ctx.fillStyle = '#ffffff'
-    ctx.fillText(`TIME: ${(video.currentTime || 0).toFixed(1)}s`, rect.x + 35 * scale, rect.y + 60 * scale)
+    const scale = fitMode === 'cover'
+      ? Math.max(cw / vw, ch / vh)
+      : Math.min(cw / vw, ch / vh)
 
-    // VISIBLE HENS
-    ctx.fillStyle = '#00ff00'
-    ctx.fillText(`VISIBLE HENS: ${visibleCount}`, rect.x + 35 * scale, rect.y + 105 * scale)
+    const renderedW = vw * scale
+    const renderedH = vh * scale
+    const offsetX = (cw - renderedW) / 2
+    const offsetY = (ch - renderedH) / 2
 
-    // TOTAL HENS
-    ctx.font = `900 ${28 * scale}px Arial`
-    ctx.fillStyle = '#00ffff' // Yellow/Cyan depending on video, stable_tracker used (0,255,255) in BGR which is Yellow
-    ctx.fillText(`TOTAL HENS: ${totalHens}`, rect.x + 35 * scale, rect.y + 155 * scale)
+    let liveCount = 0
+
+    // Draw bounding boxes accurately on hen combs
+    for (const item of detections) {
+      const nb = item.normBox
+      if (!nb || nb.length < 4) continue
+
+      const targetX = offsetX + nb[0] * renderedW
+      const targetY = offsetY + nb[1] * renderedH
+      const targetW = (nb[2] - nb[0]) * renderedW
+      const targetH = (nb[3] - nb[1]) * renderedH
+
+      // Instant comb follow: exactly tracks rapid comb motion with zero lag
+      const henId = Number(item.hen_number) || 0
+      let x = targetX
+      let y = targetY
+      let width = targetW
+      let height = targetH
+      animBoxesRef.current.set(henId, [x, y, width, height])
+
+      if (width <= 4 || height <= 4) continue
+      // Head-only check: strictly reject oversized body boxes while capturing all head orientations (kutti box on head only)
+      const wRatio = width / renderedW
+      const hRatio = height / renderedH
+      const isPortrait = renderedW < renderedH
+      const maxWRatio = isPortrait ? 0.26 : 0.18
+      const maxHRatio = isPortrait ? 0.26 : 0.22
+      const maxAreaRatio = 0.030
+      if (wRatio > maxWRatio || hRatio > maxHRatio || (wRatio * hRatio) > maxAreaRatio) continue
+      const aspect = width / Math.max(height, 1)
+      if (aspect < 0.30 || aspect > 1.85) continue
+      if (x + width < 0 || x > cw || y + height < 0 || y > ch) continue
+
+      // Tighten box to compact square-ish comb dimensions (kutti box on head only)
+      if (width > height * 1.25) {
+        const midX = x + width / 2
+        width = height * 1.15
+        x = midX - width / 2
+      } else if (height > width * 1.35) {
+        height = width * 1.25
+      }
+      
+      liveCount++
+
+      // Draw glowing green box
+      ctx.strokeStyle = '#22c55e'
+      ctx.lineWidth = 3
+      ctx.shadowColor = 'rgba(34, 197, 94, 0.75)'
+      ctx.shadowBlur = 8
+      ctx.strokeRect(x, y, width, height)
+      ctx.shadowBlur = 0
+
+      // Viewfinder corner brackets
+      const cornerLen = Math.min(10, width * 0.3, height * 0.3)
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.moveTo(x, y + cornerLen); ctx.lineTo(x, y); ctx.lineTo(x + cornerLen, y)
+      ctx.moveTo(x + width - cornerLen, y); ctx.lineTo(x + width, y); ctx.lineTo(x + width, y + cornerLen)
+      ctx.moveTo(x, y + height - cornerLen); ctx.lineTo(x, y + height); ctx.lineTo(x + cornerLen, y + height)
+      ctx.moveTo(x + width - cornerLen, y + height); ctx.lineTo(x + width, y + height); ctx.lineTo(x + width, y + height - cornerLen)
+      ctx.stroke()
+
+      // Draw label: Hen 1, Hen 2, Hen 3...
+      const label = `Hen ${item.hen_number}`
+      ctx.font = 'bold 13px Outfit, Arial, sans-serif'
+      const textWidth = ctx.measureText(label).width
+      const tagH = 20
+      const tagY = Math.max(0, y - tagH - 2)
+      
+      ctx.fillStyle = '#22c55e'
+      ctx.fillRect(x, tagY, textWidth + 8, tagH)
+      
+      ctx.fillStyle = '#000000'
+      ctx.fillText(label, x + 4, tagY + 14)
+
+      // Center tracking dot directly on comb
+      const cx = x + width / 2
+      const cy = y + height / 2
+      ctx.beginPath()
+      ctx.arc(cx, cy, 3.5, 0, Math.PI * 2)
+      ctx.fillStyle = '#22c55e'
+      ctx.fill()
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    }
+
+    // Draw HUD
+    const hudW = Math.min(230, cw * 0.48)
+    const hudH = 78
+    const hudX = 14
+    const hudY = 74
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.78)'
+    if (typeof (ctx as any).roundRect === 'function') {
+      (ctx as any).roundRect(hudX, hudY, hudW, hudH, 10)
+      ctx.fill()
+    } else {
+      ctx.fillRect(hudX, hudY, hudW, hudH)
+    }
+    ctx.strokeStyle = 'rgba(34, 197, 94, 0.5)'
+    ctx.lineWidth = 1.2
+    ctx.stroke()
+
+    const curTime = isLiveMode ? (Date.now() - startTimeRef.current) / 1000 : (video.currentTime || 0)
+    ctx.font = 'bold 12px monospace'
+    ctx.fillStyle = '#94a3b8'
+    ctx.fillText(`TIME: ${curTime.toFixed(1)}s`, hudX + 12, hudY + 22)
+
+    ctx.font = 'bold 13px sans-serif'
+    ctx.fillStyle = '#22c55e'
+    ctx.fillText(`VISIBLE HENS: ${liveCount}`, hudX + 12, hudY + 44)
+
+    ctx.font = 'bold 15px sans-serif'
+    ctx.fillStyle = '#00ffff'
+    ctx.fillText(`TOTAL HENS: ${totalHens || liveCount}`, hudX + 12, hudY + 66)
   }
 
   return (
@@ -421,7 +601,7 @@ export default function HenTrackingPage() {
                 <input type="file" accept="video/*" onChange={handleVideoUpload} style={{ display: 'none' }} />
               </label>
 
-              <div onClick={startCamera} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px' }}>
+              <div onClick={() => startCamera('environment')} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)', borderRadius: '12px', padding: '40px', cursor: 'pointer', background: 'rgba(255,255,255,0.02)', flex: '1 1 200px' }}>
                 <Video size={52} color="#22c55e" style={{ marginBottom: '16px' }} />
                 <span style={{ fontSize: '1.1rem', fontWeight: '500', marginBottom: '8px' }}>Start Live Video</span>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>Track hens live using your camera.</span>
@@ -429,14 +609,126 @@ export default function HenTrackingPage() {
             </div>
           )}
 
-          <div style={{ display: (hasVideoUrl || isCameraOpen) ? 'block' : 'none', position: 'relative', borderRadius: '12px', overflow: 'hidden', border: `2px solid #3b82f6`, background: '#000' }}>
-            <video ref={videoRef} playsInline style={{ display: 'block', width: '100%', height: 'auto', maxHeight: '550px', objectFit: 'contain' }} />
-            <canvas ref={overlayRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
-            
-            <button onClick={resetAI} style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(0,0,0,0.6)', border: 'none', color: '#fff', borderRadius: '50%', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <RefreshCw size={18} />
-            </button>
-          </div>
+          {/* If Full Screen or Camera Open, render via Portal directly into document.body */}
+          {(isFullScreen || isCameraOpen) && createPortal(
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                width: '100vw',
+                height: '100dvh',
+                zIndex: 2147483647,
+                background: '#000',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden'
+              }}
+            >
+              <video
+                ref={videoRef}
+                playsInline
+                autoPlay
+                muted
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: fitMode,
+                  backgroundColor: '#000'
+                }}
+              />
+              <canvas
+                ref={overlayRef}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  pointerEvents: 'none',
+                  zIndex: 2
+                }}
+              />
+
+              {/* Viewfinder Controls Bar (Top-Right) */}
+              <div style={{ position: 'absolute', top: '16px', right: '16px', display: 'flex', gap: '8px', zIndex: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setFitMode(m => m === 'cover' ? 'contain' : 'cover')}
+                  title={fitMode === 'cover' ? 'Fit (Letterbox)' : 'Fill (Full)'}
+                  style={{ background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', borderRadius: '20px', height: '38px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}
+                >
+                  <Scan size={15} />
+                  <span>{fitMode === 'cover' ? 'FILL' : 'FIT'}</span>
+                </button>
+
+                {isCameraOpen && (
+                  <button
+                    type="button"
+                    onClick={handleFlipCamera}
+                    title="Switch Front/Back Camera"
+                    style={{ background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: '50%', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                  >
+                    <RefreshCw size={18} />
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsFullScreen(false)
+                    if (isCameraOpen) stopCamera()
+                  }}
+                  title="Close"
+                  style={{ background: 'rgba(239,68,68,0.85)', border: 'none', color: '#fff', borderRadius: '50%', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>,
+            document.body
+          )}
+
+          {/* Normal In-Card View for Local Video Upload (when not in fullscreen portal) */}
+          {hasVideoUrl && !isFullScreen && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                position: 'relative',
+                borderRadius: '12px',
+                overflow: 'hidden',
+                border: `2px solid #3b82f6`,
+                background: '#000',
+                minHeight: 380
+              }}
+            >
+              <div style={{ position: 'relative', display: 'inline-flex', justifyContent: 'center', alignItems: 'center', maxWidth: '100%', maxHeight: '550px', lineHeight: 0 }}>
+                <video ref={videoRef} playsInline controls style={{ display: 'block', maxWidth: '100%', maxHeight: '550px', objectFit: 'contain' }} />
+                <canvas ref={overlayRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
+              </div>
+              <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', gap: '8px', zIndex: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setIsFullScreen(true)}
+                  title="Full Screen"
+                  style={{ background: 'rgba(0,0,0,0.65)', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', borderRadius: '50%', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
+                  <Maximize2 size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={resetAI}
+                  title="Reset / Stop"
+                  style={{ background: 'rgba(239,68,68,0.7)', border: 'none', color: '#fff', borderRadius: '50%', width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+          )}
 
           {(hasVideoUrl || isCameraOpen) && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>

@@ -106,6 +106,8 @@ export const aiApi = {
   verify: (evidenceId: string) => api.post(`/api/ai/verify/${evidenceId}`),
   result: (evidenceId: string) => api.get(`/api/ai/result/${evidenceId}`),
   countTrays: (formData: FormData) => api.post('/api/ai/count-trays', formData),
+  /** Live high-speed frame detection for mobile fullscreen camera scanner */
+  liveEggDetect: (formData: FormData) => api.post('/api/ai/live-egg-detect', formData),
   /** Dual OpenAI/Gemini Vision: POST /api/ai/analyze-dual-egg-images */
   analyzeDualEggImage: (formData: FormData) => api.post('/api/ai/analyze-dual-egg-images', formData),
   /** OpenAI Vision: POST /api/ai/analyze-egg-image */
