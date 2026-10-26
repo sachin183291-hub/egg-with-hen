@@ -54,13 +54,22 @@ def create_tables():
             Base.metadata.create_all(bind=engine)
             print("[OK] Database tables created successfully.")
             break
-        except sqlalchemy.exc.OperationalError as e:
+        except Exception as e:
             if i < retries - 1:
-                print(f"[WARNING] Database not ready yet, retrying in 5 seconds... ({i+1}/{retries})")
-                time.sleep(5)
+                print(f"[WARNING] Database not ready yet, retrying in 3 seconds... ({i+1}/{retries})")
+                time.sleep(3)
             else:
-                print("[ERROR] Database failed to start after multiple retries.")
-                raise e
+                print(f"[WARNING] Primary database unavailable ({e}). Falling back to local SQLite to keep server operational.")
+                try:
+                    global engine, SessionLocal
+                    backend_dir = Path(__file__).resolve().parent.parent.parent
+                    fallback_url = f"sqlite:///{backend_dir / 'giotag.db'}"
+                    engine = create_engine(fallback_url, connect_args={"check_same_thread": False})
+                    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+                    Base.metadata.create_all(bind=engine)
+                    print("[OK] Local SQLite fallback database initialized.")
+                except Exception as ex:
+                    print(f"[ERROR] SQLite fallback error: {ex}")
 
 
 def get_db() -> Generator[Session, None, None]:

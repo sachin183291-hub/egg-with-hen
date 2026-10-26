@@ -5,7 +5,13 @@ import { getTrackerBaseUrl, getApiBaseUrl, setCustomBackendUrl } from '../utils/
 
 export default function HenCombTrackingPage() {
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
-  const [streamMode, setStreamMode] = useState<'video' | 'camera' | null>(null)
+  const [streamMode, setStreamMode] = useState<'video' | 'camera' | 'local_video' | null>(null)
+  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null)
+  const [activeLoadingCard, setActiveLoadingCard] = useState<'record' | 'upload' | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
+  const [uploadStatusText, setUploadStatusText] = useState<string | null>(null)
+  const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null)
+  const [showUploadChoiceModal, setShowUploadChoiceModal] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [totalCount, setTotalCount] = useState(0)
@@ -27,6 +33,7 @@ export default function HenCombTrackingPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
   const recordingTimerRef = useRef<any>(null)
+  const xhrRef = useRef<XMLHttpRequest | null>(null)
 
   // Live Camera WebRTC & Canvas refs
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -115,21 +122,34 @@ export default function HenCombTrackingPage() {
     return () => clearInterval(interval)
   }, [streamUrl, streamMode])
 
-  // Guaranteed camera stream attacher: Ensures video plays and loop starts as soon as portal mounts
+  // Guaranteed camera and local video stream attacher: Ensures video plays and loop starts
   useEffect(() => {
-    if (streamMode !== 'camera' || !streamRef.current) return
+    if (streamMode !== 'camera' && streamMode !== 'local_video') return
 
     let checkInterval: any = null
     const attachAndRun = async () => {
       const video = videoRef.current
       if (!video) return
 
-      if (video.srcObject !== streamRef.current) {
-        video.srcObject = streamRef.current
+      if (streamMode === 'camera') {
+        if (!streamRef.current) return
+        if (video.srcObject !== streamRef.current) {
+          video.srcObject = streamRef.current
+        }
+        video.controls = false
+        video.muted = true
+        video.playsInline = true
+      } else if (streamMode === 'local_video') {
+        if (!localVideoUrl) return
+        if (video.src !== localVideoUrl) {
+          video.src = localVideoUrl
+        }
+        video.controls = true
+        video.muted = true
+        video.playsInline = true
+        video.loop = true
       }
-      video.controls = false
-      video.muted = true
-      video.playsInline = true
+
       try {
         await video.play()
       } catch (e) {}
@@ -154,56 +174,133 @@ export default function HenCombTrackingPage() {
     return () => {
       if (checkInterval) clearInterval(checkInterval)
     }
-  }, [streamMode])
+  }, [streamMode, localVideoUrl])
 
-  // ─── Video Upload & Demo Video Handlers ───
-  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ─── Video Upload & Instant Local Playback Handlers ───
+  const startInstantLocalPlayback = (file: File) => {
+    stopLiveCamera()
+    if (localVideoUrl) {
+      URL.revokeObjectURL(localVideoUrl)
+    }
+    setErrorMsg(null)
+    setActiveLoadingCard(null)
+    setIsProcessing(false)
+    setShowUploadChoiceModal(false)
+    setPendingVideoFile(null)
+
+    const blobUrl = URL.createObjectURL(file)
+    setLocalVideoUrl(blobUrl)
+    setStreamUrl(null)
+    setStreamMode('local_video')
+    setTotalCount(0)
+    setVisibleCount(0)
+    startTimeRef.current = Date.now()
+    runningRef.current = false
+    latestResultsRef.current = []
+    animBoxesRef.current.clear()
+  }
+
+  const startCloudUpload = (file: File) => {
+    setShowUploadChoiceModal(false)
+    setErrorMsg(null)
+    setUploadProgress(0)
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+    setUploadStatusText(`Preparing upload (${sizeMB} MB)...`)
+    setIsProcessing(true)
+
+    const activeBackendUrl = getTrackerBaseUrl()
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const xhr = new XMLHttpRequest()
+    xhrRef.current = xhr
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.round((event.loaded / event.total) * 100)
+        setUploadProgress(percent)
+        const loadedMB = (event.loaded / (1024 * 1024)).toFixed(1)
+        const totalMB = (event.total / (1024 * 1024)).toFixed(1)
+        setUploadStatusText(`Uploading: ${percent}% (${loadedMB} / ${totalMB} MB)`)
+      }
+    }
+
+    xhr.onload = () => {
+      setActiveLoadingCard(null)
+      setIsProcessing(false)
+      setUploadProgress(null)
+      setUploadStatusText(null)
+      xhrRef.current = null
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const resp = JSON.parse(xhr.responseText)
+          if (resp && resp.success) {
+            setStreamUrl(`${activeBackendUrl}/stream_video/${encodeURIComponent(resp.filename)}?t=${Date.now()}`)
+            setStreamMode('video')
+            setBackendPingStatus('online')
+          } else {
+            setErrorMsg('Cloud processing notice: ' + (resp?.error || 'Switched to Instant Device Playback.'))
+            startInstantLocalPlayback(file)
+          }
+        } catch (e) {
+          startInstantLocalPlayback(file)
+        }
+      } else {
+        setErrorMsg(`Cloud server returned code ${xhr.status}. Switched to Instant Device Playback.`)
+        startInstantLocalPlayback(file)
+      }
+    }
+
+    xhr.onerror = () => {
+      setActiveLoadingCard(null)
+      setIsProcessing(false)
+      setUploadProgress(null)
+      setUploadStatusText(null)
+      xhrRef.current = null
+      setErrorMsg('Cloud upload connection reset. Switched to Instant Device Playback.')
+      startInstantLocalPlayback(file)
+    }
+
+    xhr.ontimeout = () => {
+      setActiveLoadingCard(null)
+      setIsProcessing(false)
+      setUploadProgress(null)
+      setUploadStatusText(null)
+      xhrRef.current = null
+      setErrorMsg('Cloud upload timed out. Switched to Instant Device Playback.')
+      startInstantLocalPlayback(file)
+    }
+
+    xhr.timeout = 180000 // 3 minutes timeout
+    xhr.open('POST', `${activeBackendUrl}/upload`, true)
+    xhr.send(formData)
+  }
+
+  const cancelUpload = () => {
+    if (xhrRef.current) {
+      xhrRef.current.abort()
+      xhrRef.current = null
+    }
+    setActiveLoadingCard(null)
+    setIsProcessing(false)
+    setUploadProgress(null)
+    setUploadStatusText(null)
+    if (pendingVideoFile) {
+      startInstantLocalPlayback(pendingVideoFile)
+    }
+  }
+
+  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>, cardType: 'record' | 'upload' = 'upload') => {
     const file = e.target.files?.[0]
     if (!file) return
 
     stopLiveCamera()
-    setIsProcessing(true)
     setErrorMsg(null)
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const activeBackendUrl = getTrackerBaseUrl()
-    try {
-      const uploadResp = await fetch(`${activeBackendUrl}/upload`, { 
-        method: 'POST', 
-        body: formData,
-        cache: 'no-store'
-      })
-      let uploadData: any = null
-      try {
-        const text = await uploadResp.text()
-        uploadData = text ? JSON.parse(text) : null
-      } catch (e) {
-        throw new Error(uploadResp.ok ? 'Invalid response from server' : `Server error (${uploadResp.status}: ${uploadResp.statusText || 'Upload failed'})`)
-      }
-
-      if (uploadData && uploadData.success) {
-        setStreamUrl(`${activeBackendUrl}/stream_video/${encodeURIComponent(uploadData.filename)}?t=${Date.now()}`)
-        setStreamMode('video')
-        setBackendPingStatus('online')
-      } else {
-        setErrorMsg('Upload failed: ' + (uploadData?.error || `Server status ${uploadResp.status}`))
-      }
-    } catch (err: any) {
-      if (err.name === 'TypeError' || err.message?.includes('Failed to fetch')) {
-        setErrorMsg(
-          'Failed to fetch: Unable to connect to backend server. ' +
-          'If hosted on Render Free Tier, the backend service spins down after 15 minutes of inactivity and requires ~45 seconds to wake up. ' +
-          'Tap "Backend Settings" above to verify the Backend URL or wait 30 seconds and try uploading again.'
-        )
-        setBackendPingStatus('sleeping')
-      } else {
-        setErrorMsg('Upload error: ' + err.message)
-      }
-    } finally {
-      setIsProcessing(false)
-      if (e.target) e.target.value = ''
-    }
+    setActiveLoadingCard(cardType)
+    setPendingVideoFile(file)
+    setShowUploadChoiceModal(true)
+    if (e.target) e.target.value = ''
   }
 
   const startDemoVideo = () => {
@@ -454,11 +551,18 @@ export default function HenCombTrackingPage() {
 
   const stopStream = async () => {
     stopLiveCamera()
+    if (localVideoUrl) {
+      URL.revokeObjectURL(localVideoUrl)
+      setLocalVideoUrl(null)
+    }
     setStreamUrl(null)
     setStreamMode(null)
     setTotalCount(0)
     setVisibleCount(0)
     setIsFullScreenVideo(false)
+    setActiveLoadingCard(null)
+    setUploadProgress(null)
+    setUploadStatusText(null)
     try {
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {})
@@ -1018,7 +1122,7 @@ export default function HenCombTrackingPage() {
 
   // ─── FULL SCREEN PORTAL FOR VIDEO STREAMING ───
   const renderFullScreenVideoPortal = () => {
-    if (!isFullScreenVideo || streamMode !== 'video' || !streamUrl) return null
+    if (!isFullScreenVideo || (!streamMode || (streamMode !== 'video' && streamMode !== 'local_video'))) return null
 
     return createPortal(
       <div
@@ -1036,11 +1140,29 @@ export default function HenCombTrackingPage() {
           overflow: 'hidden'
         }}
       >
-        <img
-          src={streamUrl}
-          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-          alt="AI Processed Video Stream"
-        />
+        {streamMode === 'local_video' ? (
+          <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <video
+              ref={videoRef}
+              src={localVideoUrl || undefined}
+              playsInline
+              controls
+              autoPlay
+              loop
+              style={{ width: '100%', height: '100%', objectFit: fitMode }}
+            />
+            <canvas
+              ref={overlayRef}
+              style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 2 }}
+            />
+          </div>
+        ) : (
+          <img
+            src={streamUrl || ''}
+            style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            alt="AI Processed Video Stream"
+          />
+        )}
 
         <div style={{ position: 'absolute', top: 16, right: 16, display: 'flex', gap: 10, zIndex: 10 }}>
           <button
@@ -1251,6 +1373,137 @@ export default function HenCombTrackingPage() {
       {renderLiveCameraPortal()}
       {renderFullScreenVideoPortal()}
 
+      {/* Choice Modal for Upload vs Instant Device Playback */}
+      {showUploadChoiceModal && pendingVideoFile && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(6px)',
+            zIndex: 999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16
+          }}
+        >
+          <div
+            style={{
+              background: '#0f172a',
+              border: '1px solid rgba(255,255,255,0.15)',
+              borderRadius: 20,
+              maxWidth: 520,
+              width: '100%',
+              padding: '28px 24px',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 18
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#f8fafc' }}>
+                Selected Video ({(pendingVideoFile.size / (1024 * 1024)).toFixed(1)} MB)
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setShowUploadChoiceModal(false); setPendingVideoFile(null); setActiveLoadingCard(null); }}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.9rem', color: '#94a3b8', lineHeight: 1.5 }}>
+              Choose how to run AI Hen Comb detection on this video:
+            </p>
+
+            {/* Option 1: Instant Device Playback (Recommended) */}
+            <div
+              onClick={() => startInstantLocalPlayback(pendingVideoFile)}
+              style={{
+                padding: '16px 18px',
+                borderRadius: 14,
+                background: 'rgba(16,185,129,0.12)',
+                border: '2px solid #10b981',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                transition: 'transform 0.15s',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#10b981', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>⚡ Instant Play on Device</span>
+                </div>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '3px 8px', borderRadius: 6, background: '#10b981', color: '#fff' }}>
+                  RECOMMENDED
+                </span>
+              </div>
+              <div style={{ fontSize: '0.85rem', color: '#cbd5e1', lineHeight: 1.4 }}>
+                • Zero wait time (plays immediately on device)<br />
+                • Full 30 FPS playback with real-time AI bounding box overlay<br />
+                • 100% reliable — never hangs or times out on Render
+              </div>
+            </div>
+
+            {/* Option 2: Cloud Server Stream */}
+            <div
+              onClick={() => startCloudUpload(pendingVideoFile)}
+              style={{
+                padding: '16px 18px',
+                borderRadius: 14,
+                background: 'rgba(59,130,246,0.08)',
+                border: '1px solid rgba(59,130,246,0.4)',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
+              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#3b82f6', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>☁️ Upload to Cloud Server</span>
+              </div>
+              <div style={{ fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.4 }}>
+                • Uploads video to cloud server with real-time progress bar<br />
+                • Server-rendered MJPEG stream
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setShowUploadChoiceModal(false); setPendingVideoFile(null); setActiveLoadingCard(null); }}
+              style={{ padding: '10px 16px', background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 10, color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Real-time Upload Progress Banner */}
+      {uploadProgress !== null && (
+        <div style={{ width: '100%', maxWidth: 750, margin: '0 auto 24px auto', padding: '16px 20px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.4)', borderRadius: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <span style={{ fontWeight: 700, color: '#10b981', fontSize: '0.95rem' }}>
+              {uploadStatusText || `Uploading Video: ${uploadProgress}%`}
+            </span>
+            <button
+              type="button"
+              onClick={cancelUpload}
+              style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.5)', color: '#ef4444', padding: '4px 12px', borderRadius: 8, fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              Cancel & Play Instantly
+            </button>
+          </div>
+          <div style={{ width: '100%', height: 8, background: 'rgba(255,255,255,0.1)', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'linear-gradient(90deg, #10b981, #06b6d4)', transition: 'width 0.2s ease-out' }} />
+          </div>
+        </div>
+      )}
+
       {/* ─── 1. Main 4-Option Stream Selection View ─── */}
       {!streamMode ? (
         <div className="card" style={{ padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -1279,43 +1532,43 @@ export default function HenCombTrackingPage() {
             <div
               id="card-record-video"
               className="ref-mode-btn"
-              onClick={() => { if (!isProcessing) cameraVideoInputRef.current?.click() }}
-              style={{ padding: '30px 18px', borderRadius: 16, border: '2px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', cursor: isProcessing ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
+              onClick={() => { if (!activeLoadingCard && !isProcessing) cameraVideoInputRef.current?.click() }}
+              style={{ padding: '30px 18px', borderRadius: 16, border: '2px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', cursor: activeLoadingCard === 'record' ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
             >
               <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#ef4444,#b91c1c)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(239,68,68,0.4)' }}>
-                {isProcessing ? <RefreshCw className="animate-spin" size={28} color="white" /> : <Video size={28} color="white" />}
+                {activeLoadingCard === 'record' ? <RefreshCw className="animate-spin" size={28} color="white" /> : <Video size={28} color="white" />}
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary, #1e293b)' }}>
-                  {isProcessing ? 'Processing Video...' : 'Record Farm Video'}
+                  {activeLoadingCard === 'record' ? 'Processing Video...' : 'Record Farm Video'}
                 </div>
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #475569)', marginTop: 4 }}>
-                  {isProcessing ? 'Streaming at normal speed' : 'Record video with phone camera & convert to live AI stream'}
+                  {activeLoadingCard === 'record' ? (uploadStatusText || 'Processing video on device...') : 'Record video with phone camera & convert to live AI stream'}
                 </div>
               </div>
             </div>
-            <input type="file" ref={cameraVideoInputRef} onChange={handleVideoUpload} accept="video/*" capture="environment" style={{ display: 'none' }} />
+            <input type="file" ref={cameraVideoInputRef} onChange={(e) => handleVideoUpload(e, 'record')} accept="video/*" capture="environment" style={{ display: 'none' }} />
 
             {/* Card 3: Upload Video File */}
             <div
               id="card-upload-video"
               className="ref-mode-btn"
-              onClick={() => { if (!isProcessing) fileInputRef.current?.click() }}
-              style={{ padding: '30px 18px', borderRadius: 16, border: '2px dashed rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.05)', cursor: isProcessing ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
+              onClick={() => { if (!activeLoadingCard && !isProcessing) fileInputRef.current?.click() }}
+              style={{ padding: '30px 18px', borderRadius: 16, border: '2px dashed rgba(16,185,129,0.4)', background: 'rgba(16,185,129,0.05)', cursor: activeLoadingCard === 'upload' ? 'wait' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}
             >
               <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg,#10b981,#059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(16,185,129,0.4)' }}>
-                {isProcessing ? <RefreshCw className="animate-spin" size={28} color="white" /> : <Upload size={28} color="white" />}
+                {activeLoadingCard === 'upload' ? <RefreshCw className="animate-spin" size={28} color="white" /> : <Upload size={28} color="white" />}
               </div>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary, #1e293b)' }}>
-                  {isProcessing ? 'Processing Video...' : 'Upload Video File'}
+                  {activeLoadingCard === 'upload' ? 'Processing Video...' : 'Upload Video File'}
                 </div>
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #475569)', marginTop: 4 }}>
-                  {isProcessing ? 'Streaming at normal speed' : 'Upload custom farm video from device'}
+                  {activeLoadingCard === 'upload' ? (uploadStatusText || 'Processing video on device...') : 'Upload custom farm video from device'}
                 </div>
               </div>
             </div>
-            <input type="file" ref={fileInputRef} onChange={handleVideoUpload} accept="video/mp4,video/x-m4v,video/*" style={{ display: 'none' }} />
+            <input type="file" ref={fileInputRef} onChange={(e) => handleVideoUpload(e, 'upload')} accept="video/mp4,video/x-m4v,video/*" style={{ display: 'none' }} />
 
             {/* Card 4: Live Camera Stream (Real-Time AI Boxes) */}
             <div
@@ -1420,12 +1673,38 @@ export default function HenCombTrackingPage() {
                 boxShadow: '0 8px 30px rgba(0,0,0,0.5)'
               }}
             >
-              <img
-                key={streamUrl}
-                src={streamUrl || ''}
-                style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain' }}
-                alt="AI Stream"
-              />
+              {streamMode === 'local_video' ? (
+                <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 440, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  <video
+                    ref={videoRef}
+                    src={localVideoUrl || undefined}
+                    playsInline
+                    controls
+                    autoPlay
+                    loop
+                    style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: fitMode }}
+                  />
+                  <canvas
+                    ref={overlayRef}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      pointerEvents: 'none',
+                      zIndex: 2
+                    }}
+                  />
+                </div>
+              ) : (
+                <img
+                  key={streamUrl}
+                  src={streamUrl || ''}
+                  style={{ maxWidth: '100%', maxHeight: '75vh', objectFit: 'contain' }}
+                  alt="AI Stream"
+                />
+              )}
             </div>
 
             {/* Bottom Stream Telemetry Bar */}

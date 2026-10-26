@@ -132,16 +132,19 @@ async def startup_event():
     except Exception as e:
         print(f"[WARNING] Blockchain init warning: {e}")
 
-    # Preload shared AI model (singleton pattern - avoids duplicate memory)
-    try:
-        from app.ai.shared_model import get_shared_model
-        import gc
-        print("[START] Initializing shared singleton YOLO model...")
-        get_shared_model()
-        gc.collect()
-        print("[OK] Shared YOLO model ready")
-    except Exception as e:
-        print(f"[WARNING] YOLO model preload note: {e}")
+    # Preload shared AI model locally (on Render, defer to on-demand to keep container startup under 1s and avoid 502 Bad Gateway)
+    if os.environ.get("RENDER") == "true":
+        print("[START] Render container active: YOLO model will load on-demand (<1s startup).")
+    else:
+        try:
+            from app.ai.shared_model import get_shared_model
+            import gc
+            print("[START] Initializing shared singleton YOLO model...")
+            get_shared_model()
+            gc.collect()
+            print("[OK] Shared YOLO model ready")
+        except Exception as e:
+            print(f"[WARNING] YOLO model preload note: {e}")
 
     print(f"[START] {settings.APP_NAME} v{settings.APP_VERSION} started ({settings.ENVIRONMENT})")
 
