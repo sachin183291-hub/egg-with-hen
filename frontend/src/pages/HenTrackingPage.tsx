@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Activity, UploadCloud, Video, RefreshCw, Layers, Maximize2, Minimize2, X, Scan } from 'lucide-react'
+import { getApiBaseUrl } from '../utils/apiUrl'
 
 export default function HenTrackingPage() {
   const [totalHens, setTotalHens] = useState(0)
@@ -70,7 +71,7 @@ export default function HenTrackingPage() {
 
   const resetAIBackend = async () => {
     try {
-      const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+      const apiUrl = getApiBaseUrl()
       await fetch(`${apiUrl}/api/tracker/reset`, { method: 'POST' })
     } catch (e) {}
   }
@@ -362,7 +363,7 @@ export default function HenTrackingPage() {
       form.append('frame_number', String(number))
       form.append('video_time', String(curTime))
 
-      const apiUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
+      const apiUrl = getApiBaseUrl()
       const response = await fetch(`${apiUrl}/api/tracker/live_frame`, {
         method: 'POST',
         body: form

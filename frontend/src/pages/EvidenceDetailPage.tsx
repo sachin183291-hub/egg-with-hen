@@ -9,6 +9,7 @@ import {
 import { ArrowLeft, Shield, Cpu, Blocks, MapPin, Clock, Hash, User, Smartphone } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuth } from '../hooks/useAuth'
+import { getApiBaseUrl } from '../utils/apiUrl'
 
 export default function EvidenceDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -138,7 +139,7 @@ export default function EvidenceDetailPage() {
   const bc = evidence.blockchain_record
   const meta = evidence.metadata_
   const imgUrl = evidence.storage_url
-    ? `${import.meta.env.VITE_API_URL || ''}${evidence.storage_url}`
+    ? `${getApiBaseUrl()}${evidence.storage_url}`
     : null
 
   return (

@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Camera, Upload, RefreshCw, FileVideo, Maximize2, Minimize2, X, Video, Scan, CheckCircle2, Activity } from 'lucide-react'
+import { Camera, Upload, RefreshCw, FileVideo, Maximize2, Minimize2, X, Video, Scan, CheckCircle2, Activity, Settings, Wifi, WifiOff } from 'lucide-react'
+import { getTrackerBaseUrl, getApiBaseUrl, setCustomBackendUrl } from '../utils/apiUrl'
 
 export default function HenCombTrackingPage() {
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
@@ -15,12 +16,17 @@ export default function HenCombTrackingPage() {
   const [isRecording, setIsRecording] = useState(false)
   const [recordingDuration, setRecordingDuration] = useState(0)
 
+  // Dynamic Backend State (works on Localhost & Render)
+  const [backendUrl, setBackendUrl] = useState<string>(() => getTrackerBaseUrl())
+  const [showBackendModal, setShowBackendModal] = useState(false)
+  const [customBackendInput, setCustomBackendInput] = useState<string>(() => getApiBaseUrl())
+  const [backendPingStatus, setBackendPingStatus] = useState<'checking' | 'online' | 'sleeping' | 'offline' | null>(null)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const cameraVideoInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const recordedChunksRef = useRef<Blob[]>([])
   const recordingTimerRef = useRef<any>(null)
-  const backendUrl = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') + '/api/tracker'
 
   // Live Camera WebRTC & Canvas refs
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -56,13 +62,47 @@ export default function HenCombTrackingPage() {
     }
   }, [])
 
+  // Check backend health & status (automatically handles Render Free Tier wake-up)
+  const checkBackendHealth = useCallback(async (customBase?: string) => {
+    const base = customBase !== undefined ? customBase : getApiBaseUrl()
+    const target = (base ? base.replace(/\/$/, '') : '') + '/api/tracker/stream_count'
+    setBackendPingStatus('checking')
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 8000)
+      const res = await fetch(target, { signal: controller.signal, cache: 'no-store' })
+      clearTimeout(timeoutId)
+      if (res.ok) {
+        setBackendPingStatus('online')
+        setBackendUrl(getTrackerBaseUrl())
+        return true
+      } else {
+        setBackendPingStatus('offline')
+        return false
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        // Taking > 8s means Render backend is currently waking up
+        setBackendPingStatus('sleeping')
+      } else {
+        setBackendPingStatus('offline')
+      }
+      return false
+    }
+  }, [])
+
+  useEffect(() => {
+    checkBackendHealth()
+  }, [checkBackendHealth])
+
   // Poll for total count when streaming server video
   // Real-time polling (350ms) for live detection & total hen counts (smooth without socket contention)
   useEffect(() => {
     if (!streamUrl || streamMode !== 'video') return
+    const activeBackendUrl = getTrackerBaseUrl()
     const interval = setInterval(async () => {
       try {
-        const resp = await fetch(`${backendUrl}/stream_count`)
+        const resp = await fetch(`${activeBackendUrl}/stream_count`, { cache: 'no-store' })
         const data = await resp.json()
         if (data && data.success) {
           setTotalCount(data.count)
@@ -73,7 +113,7 @@ export default function HenCombTrackingPage() {
       } catch (e) {}
     }, 350)
     return () => clearInterval(interval)
-  }, [streamUrl, streamMode, backendUrl])
+  }, [streamUrl, streamMode])
 
   // Guaranteed camera stream attacher: Ensures video plays and loop starts as soon as portal mounts
   useEffect(() => {
@@ -127,8 +167,13 @@ export default function HenCombTrackingPage() {
     const formData = new FormData()
     formData.append('file', file)
 
+    const activeBackendUrl = getTrackerBaseUrl()
     try {
-      const uploadResp = await fetch(`${backendUrl}/upload`, { method: 'POST', body: formData })
+      const uploadResp = await fetch(`${activeBackendUrl}/upload`, { 
+        method: 'POST', 
+        body: formData,
+        cache: 'no-store'
+      })
       let uploadData: any = null
       try {
         const text = await uploadResp.text()
@@ -138,22 +183,34 @@ export default function HenCombTrackingPage() {
       }
 
       if (uploadData && uploadData.success) {
-        setStreamUrl(`${backendUrl}/stream_video/${encodeURIComponent(uploadData.filename)}?t=${Date.now()}`)
+        setStreamUrl(`${activeBackendUrl}/stream_video/${encodeURIComponent(uploadData.filename)}?t=${Date.now()}`)
         setStreamMode('video')
+        setBackendPingStatus('online')
       } else {
         setErrorMsg('Upload failed: ' + (uploadData?.error || `Server status ${uploadResp.status}`))
       }
     } catch (err: any) {
-      setErrorMsg('Error: ' + err.message)
+      if (err.name === 'TypeError' || err.message?.includes('Failed to fetch')) {
+        setErrorMsg(
+          'Failed to fetch: Unable to connect to backend server. ' +
+          'If hosted on Render Free Tier, the backend service spins down after 15 minutes of inactivity and requires ~45 seconds to wake up. ' +
+          'Tap "Backend Settings" above to verify the Backend URL or wait 30 seconds and try uploading again.'
+        )
+        setBackendPingStatus('sleeping')
+      } else {
+        setErrorMsg('Upload error: ' + err.message)
+      }
     } finally {
       setIsProcessing(false)
+      if (e.target) e.target.value = ''
     }
   }
 
   const startDemoVideo = () => {
     stopLiveCamera()
     setErrorMsg(null)
-    setStreamUrl(`${backendUrl}/stream_video/demo_hen_video.mp4?t=${Date.now()}`)
+    const activeBackendUrl = getTrackerBaseUrl()
+    setStreamUrl(`${activeBackendUrl}/stream_video/demo_hen_video.mp4?t=${Date.now()}`)
     setStreamMode('video')
   }
 
@@ -241,7 +298,7 @@ export default function HenCombTrackingPage() {
 
     try {
       try {
-        await fetch(`${backendUrl}/reset`, { method: 'POST' })
+        await fetch(`${getTrackerBaseUrl()}/reset`, { method: 'POST' })
       } catch (e) {}
 
       const stream = await getBackCameraStream(targetFacing)
@@ -324,7 +381,7 @@ export default function HenCombTrackingPage() {
       const mimeType = MediaRecorder.isTypeSupported('video/mp4')
         ? 'video/mp4'
         : (MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm')
-      const recorder = new MediaRecorder(streamRef.current, { mimeType })
+      const recorder = new MediaRecorder(streamRef.current, { mimeType, videoBitsPerSecond: 1200000 })
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
           recordedChunksRef.current.push(e.data)
@@ -340,8 +397,13 @@ export default function HenCombTrackingPage() {
         const file = new File([blob], `live_camera_recorded_${Date.now()}.${ext}`, { type: mimeType })
         const formData = new FormData()
         formData.append('file', file)
+        const activeBackendUrl = getTrackerBaseUrl()
         try {
-          const uploadResp = await fetch(`${backendUrl}/upload`, { method: 'POST', body: formData })
+          const uploadResp = await fetch(`${activeBackendUrl}/upload`, { 
+            method: 'POST', 
+            body: formData,
+            cache: 'no-store'
+          })
           let uploadData: any = null
           try {
             const text = await uploadResp.text()
@@ -350,13 +412,19 @@ export default function HenCombTrackingPage() {
             throw new Error(uploadResp.ok ? 'Invalid response from server' : `Server error (${uploadResp.status}: ${uploadResp.statusText || 'Upload failed'})`)
           }
           if (uploadData && uploadData.success) {
-            setStreamUrl(`${backendUrl}/stream_video/${encodeURIComponent(uploadData.filename)}?t=${Date.now()}`)
+            setStreamUrl(`${activeBackendUrl}/stream_video/${encodeURIComponent(uploadData.filename)}?t=${Date.now()}`)
             setStreamMode('video')
+            setBackendPingStatus('online')
           } else {
             setErrorMsg('Processing failed: ' + (uploadData?.error || `Server status ${uploadResp.status}`))
           }
         } catch (err: any) {
-          setErrorMsg('Error: ' + err.message)
+          if (err.name === 'TypeError' || err.message?.includes('Failed to fetch')) {
+            setErrorMsg('Connection failed ("Failed to fetch"). If hosted on Render Free Tier, the backend service is waking up (~45s). Please retry shortly.')
+            setBackendPingStatus('sleeping')
+          } else {
+            setErrorMsg('Error: ' + err.message)
+          }
         } finally {
           setIsProcessing(false)
         }
@@ -397,7 +465,7 @@ export default function HenCombTrackingPage() {
       }
     } catch (e) {}
     try {
-      await fetch(`${backendUrl}/stop_stream`, { method: 'POST' })
+      await fetch(`${getTrackerBaseUrl()}/stop_stream`, { method: 'POST' })
     } catch (e) {}
   }
 
@@ -458,7 +526,8 @@ export default function HenCombTrackingPage() {
       form.append('frame_number', String(frameNum))
       form.append('video_time', String((Date.now() - startTimeRef.current) / 1000))
 
-      const response = await fetch(`${backendUrl}/live_frame`, {
+      const activeBackendUrl = getTrackerBaseUrl()
+      const response = await fetch(`${activeBackendUrl}/live_frame`, {
         method: 'POST',
         body: form
       })
@@ -1023,9 +1092,154 @@ export default function HenCombTrackingPage() {
       <h2 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 8, color: 'var(--text-primary, #1e293b)', textAlign: 'center' }}>
         Live AI Streaming
       </h2>
-      <p style={{ color: 'var(--text-secondary, #475569)', textAlign: 'center', marginBottom: 36, fontSize: '1.05rem' }}>
+      <p style={{ color: 'var(--text-secondary, #475569)', textAlign: 'center', marginBottom: 20, fontSize: '1.05rem' }}>
         Real-time Hen Comb AI Detection & Tracking at normal speed
       </p>
+
+      {/* Backend Status & Configuration Bar */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24, gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={() => setShowBackendModal(true)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '7px 16px',
+            borderRadius: 20,
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            background: backendPingStatus === 'online'
+              ? 'rgba(34, 197, 94, 0.12)'
+              : backendPingStatus === 'sleeping'
+              ? 'rgba(234, 179, 8, 0.15)'
+              : 'rgba(148, 163, 184, 0.12)',
+            border: `1px solid ${
+              backendPingStatus === 'online'
+                ? 'rgba(34, 197, 94, 0.4)'
+                : backendPingStatus === 'sleeping'
+                ? 'rgba(234, 179, 8, 0.5)'
+                : 'rgba(148, 163, 184, 0.3)'
+            }`,
+            color: backendPingStatus === 'online'
+              ? '#22c55e'
+              : backendPingStatus === 'sleeping'
+              ? '#eab308'
+              : '#94a3b8',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+        >
+          {backendPingStatus === 'online' ? (
+            <Wifi size={14} color="#22c55e" />
+          ) : backendPingStatus === 'sleeping' ? (
+            <RefreshCw size={14} className="animate-spin" color="#eab308" />
+          ) : (
+            <WifiOff size={14} color="#ef4444" />
+          )}
+          <span>
+            {backendPingStatus === 'online'
+              ? `Backend Connected (${getApiBaseUrl() || 'Localhost'})`
+              : backendPingStatus === 'sleeping'
+              ? 'Render Backend Waking Up (~30s)... Click to test'
+              : `Backend: ${getApiBaseUrl() || 'Localhost'} (Click to configure)`}
+          </span>
+          <Settings size={13} style={{ marginLeft: 4, opacity: 0.8 }} />
+        </button>
+      </div>
+
+      {/* Backend Settings Modal */}
+      {showBackendModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.75)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 20
+        }}>
+          <div className="card" style={{ maxWidth: 520, width: '100%', padding: 24, borderRadius: 16, border: '1px solid rgba(255,255,255,0.15)', background: 'var(--bg-card, #1e293b)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Settings size={20} color="#10b981" />
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)' }}>Backend Connection Settings</h3>
+              </div>
+              <button type="button" onClick={() => setShowBackendModal(false)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary, #94a3b8)', marginBottom: 16, lineHeight: 1.5 }}>
+              Enter your active Render Backend Web Service URL so uploads and AI streams work without "Failed to fetch" errors. On localhost, leave this empty.
+            </p>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, marginBottom: 6, color: 'var(--text-primary)' }}>
+                Backend Web Service URL:
+              </label>
+              <input
+                type="text"
+                value={customBackendInput}
+                onChange={e => setCustomBackendInput(e.target.value)}
+                placeholder="e.g. https://egg-with-hen.onrender.com"
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: '1px solid var(--border-subtle, rgba(255,255,255,0.2))',
+                  background: 'rgba(0,0,0,0.25)',
+                  color: 'var(--text-primary, #fff)',
+                  fontSize: '0.9rem'
+                }}
+              />
+              <span style={{ fontSize: '0.78rem', color: '#94a3b8', marginTop: 4, display: 'block' }}>
+                Current Active: {getApiBaseUrl() || 'Localhost (proxied through port 5173)'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => checkBackendHealth(customBackendInput)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(16,185,129,0.4)',
+                  background: 'rgba(16,185,129,0.1)',
+                  color: '#10b981',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                {backendPingStatus === 'checking' ? 'Testing...' : 'Test Connection'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomBackendUrl(customBackendInput)
+                  setBackendUrl(getTrackerBaseUrl())
+                  checkBackendHealth(customBackendInput)
+                  setShowBackendModal(false)
+                }}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#10b981',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Save & Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {errorMsg && (
         <div style={{ padding: '16px 20px', background: 'rgba(239,68,68,0.1)', borderLeft: '4px solid #ef4444', borderRadius: 8, color: '#fca5a5', marginBottom: 20 }}>
@@ -1126,7 +1340,8 @@ export default function HenCombTrackingPage() {
               onClick={() => {
                 stopLiveCamera()
                 setErrorMsg(null)
-                setStreamUrl(`${backendUrl}/stream_video/camera?t=${Date.now()}`)
+                const activeBackendUrl = getTrackerBaseUrl()
+                setStreamUrl(`${activeBackendUrl}/stream_video/camera?t=${Date.now()}`)
                 setStreamMode('video')
               }}
               style={{ padding: '30px 18px', borderRadius: 16, border: '2px solid rgba(14,165,233,0.4)', background: 'rgba(14,165,233,0.08)', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, transition: 'all 0.3s' }}

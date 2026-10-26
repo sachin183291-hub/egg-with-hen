@@ -61,11 +61,9 @@ app = FastAPI(
 )
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
-# IMPORTANT: Cannot use allow_origin_regex with allow_credentials=True (browser blocks it)
-# Set CORS_ORIGINS env var to your actual frontend URL(s) on Render/Vercel
+# Allows all origins (Render cloud, Vercel, localhost, local IP network)
 cors_origins = settings.cors_origins_list
 
-# If wildcard "*" is in the list, allow all origins but disable credentials (safe fallback)
 if "*" in cors_origins:
     app.add_middleware(
         CORSMiddleware,
@@ -73,14 +71,17 @@ if "*" in cors_origins:
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
 else:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
+        allow_origin_regex=r"^https?://.*",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
 
 # ─── Static file serving for uploads ──────────────────────────────────────────

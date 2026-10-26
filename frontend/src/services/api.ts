@@ -2,10 +2,11 @@
  * Axios API client with JWT interceptor and auth refresh.
  */
 import axios from 'axios'
+import { getApiBaseUrl } from '../utils/apiUrl'
 
-// On Render: VITE_API_URL is injected at build time from the backend service URL
-// On localhost: empty string means Vite proxy handles /api/* → http://127.0.0.1:8000
-const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '') // cache-bust: 1
+// Dynamically resolved: localhost uses empty string (Vite proxy to 127.0.0.1:8000),
+// Render cloud uses inferred or configured backend URL.
+const API_URL = getApiBaseUrl()
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -14,8 +15,12 @@ export const api = axios.create({
   withCredentials: false,  // use token-based auth (Bearer), not cookies
 })
 
-// ─── Request interceptor: attach JWT ─────────────────────────────────────────
+// ─── Request interceptor: attach JWT & dynamic baseURL ────────────────────────
 api.interceptors.request.use((config) => {
+  const currentBase = getApiBaseUrl()
+  if (currentBase) {
+    config.baseURL = currentBase
+  }
   const token = localStorage.getItem('access_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
   if (config.data instanceof FormData) {

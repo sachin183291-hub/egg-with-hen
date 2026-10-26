@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import { Plane, Battery, Wifi, Save, Activity, Signal, ArrowUp, Wind, Camera, MapPin, Video, Zap, Compass } from 'lucide-react'
+import { getApiBaseUrl } from '../utils/apiUrl'
 
 export default function DronePage() {
   const [batteryLevel, setBatteryLevel] = useState(85)
   const [ipAddress, setIpAddress] = useState(localStorage.getItem('droneIP') || '192.168.1.100')
   const [savedIp, setSavedIp] = useState('')
-  const API_URL = import.meta.env.VITE_API_URL || ''
+  const API_URL = getApiBaseUrl()
   const [isSaving, setIsSaving] = useState(false)
   const [finalRecord, setFinalRecord] = useState<{count: number, videoUrl: string} | null>(null)
   

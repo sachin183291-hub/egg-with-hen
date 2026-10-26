@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Thermometer, UploadCloud, Activity, Camera, RefreshCw, Video } from 'lucide-react'
 import { aiApi } from '../services/api'
+import { getApiBaseUrl } from '../utils/apiUrl'
 
 export default function ThermalCameraPage() {
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
@@ -24,7 +25,7 @@ export default function ThermalCameraPage() {
   const [isLiveConnected, setIsLiveConnected] = useState(false)
   const [finalRecord, setFinalRecord] = useState<{ count: number, videoUrl: string } | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const API_URL = import.meta.env.VITE_API_URL || ''
+  const API_URL = getApiBaseUrl()
 
   // Poll for job completion
   const pollJobStatus = async (jobId: string) => {

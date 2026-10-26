@@ -786,6 +786,7 @@ def upload_reference():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/upload', methods=['POST'])
+@app.route('/api/tracker/upload', methods=['POST'])
 def upload():
     file = request.files.get('video') or request.files.get('file')
     if not file:
@@ -857,6 +858,7 @@ def get_reference_settings():
 
 @app.route('/stream/<filename>')
 @app.route('/stream_video/<filename>')
+@app.route('/api/tracker/stream_video/<filename>')
 def stream_video(filename):
     if filename == 'camera':
         if reference_settings.get('reference_video') is not None:
