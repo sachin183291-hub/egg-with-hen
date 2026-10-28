@@ -61,6 +61,9 @@ if not os.path.exists(MODEL_PATH):
     is_cuda = torch.cuda.is_available()
     if is_cuda:
         possible_paths = [
+            os.path.join(_this_dir, 'backend', 'best_quant.onnx'),
+            os.path.join(_this_dir, 'best_quant.onnx'),
+            'best_quant.onnx',
             os.path.join(_this_dir, 'backend', 'best.pt'),
             os.path.join(_this_dir, 'best.pt'),
             'best.pt',
@@ -70,6 +73,9 @@ if not os.path.exists(MODEL_PATH):
         ]
     else:
         possible_paths = [
+            os.path.join(_this_dir, 'backend', 'best_quant.onnx'),
+            os.path.join(_this_dir, 'best_quant.onnx'),
+            'best_quant.onnx',
             os.path.join(_this_dir, 'backend', 'best.onnx'),
             os.path.join(_this_dir, 'best.onnx'),
             'best.onnx',
@@ -343,7 +349,7 @@ def _sync_generate_frames(video_source, ref_settings=None):
     hens = {}
     next_id = 1
     try:
-        init_dets = extract_combs(sample_frame, conf_thresh=0.03, imgsz=640)
+        init_dets = extract_combs(sample_frame, conf_thresh=0.03, imgsz=352)
         init_in_zone = [d for d in init_dets if is_in_zone(d["center"][0], d["center"][1])]
         if OUT_W < OUT_H:
             init_in_zone.sort(key=lambda d: -d["center"][1])

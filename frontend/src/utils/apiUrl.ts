@@ -24,16 +24,21 @@ export function getApiBaseUrl(): string {
   }
 
   // 3. Smart Cloud Auto-Resolution for Render (e.g. my-app-frontend.onrender.com -> my-app-backend.onrender.com)
-  if (typeof window !== 'undefined' && window.location.hostname.includes('.onrender.com')) {
+  if (typeof window !== 'undefined') {
     const host = window.location.hostname
-    if (host.includes('-frontend.')) {
-      return `https://${host.replace('-frontend.', '-backend.')}`
+    if (host.includes('.onrender.com')) {
+      if (host.includes('-frontend.')) {
+        return `https://${host.replace('-frontend.', '-backend.')}`
+      }
+      if (host.includes('frontend.')) {
+        return `https://${host.replace('frontend.', 'backend.')}`
+      }
+      // Standard default blueprint service name
+      return 'https://giotag-backend.onrender.com'
     }
-    if (host.includes('frontend.')) {
-      return `https://${host.replace('frontend.', 'backend.')}`
+    if (host.includes('.vercel.app') || host.includes('.netlify.app')) {
+      return 'https://giotag-backend.onrender.com'
     }
-    // Standard default blueprint service name
-    return 'https://giotag-backend.onrender.com'
   }
 
   // 4. Localhost / same-origin fallback
