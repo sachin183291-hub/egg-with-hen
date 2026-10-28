@@ -27,15 +27,15 @@ echo  [💻 LAPTOP / PC]:
 echo     https://localhost:5173
 echo.
 echo  [📱 MOBILE PHONE] (Connect phone to same Wi-Fi or Laptop Hotspot):
-echo     https://10.238.244.237:5173
+echo     https://10.149.74.237:5173
 echo     https://192.168.137.1:5173
 echo.
 echo  ----------------------------------------------------------------------
 echo  IMPORTANT: HOW TO ACCESS ON MOBILE FOR 100%% EXACT HARDWARE GPS:
 echo  1. Connect your mobile phone to the same Wi-Fi or Laptop Hotspot.
-echo  2. Open Chrome/Safari and visit: https://10.238.244.237:5173
+echo  2. Open Chrome/Safari and visit: https://10.149.74.237:5173
 echo  3. When browser says 'Your connection is not private', tap:
-echo     'Advanced' -> 'Proceed to 10.238.244.237 (unsafe)'
+echo     'Advanced' -> 'Proceed to 10.149.74.237 (unsafe)'
 echo  4. Allow Location Permission when taking photo to get exact satellite GPS!
 echo ======================================================================
 echo.

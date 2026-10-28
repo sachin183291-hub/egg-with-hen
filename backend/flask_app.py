@@ -620,7 +620,7 @@ def _sync_generate_frames(video_source, ref_settings=None):
                 c_len = max(5, int(min(bw, bh) * 0.28))
                 for px, py, dx, dy in [(x1, y1, 1, 1), (x2, y1, -1, 1), (x1, y2, 1, -1), (x2, y2, -1, -1)]:
                     cv2.line(display, (px, py), (px + dx * c_len, py), (255, 255, 255), 2, cv2.LINE_AA)
-                    cv2.line(display, (px, py), (px + dy * c_len), (255, 255, 255), 2, cv2.LINE_AA)
+                    cv2.line(display, (px, py), (px, py + dy * c_len), (255, 255, 255), 2, cv2.LINE_AA)
 
                 # 3. Center target reticle dot
                 cv2.circle(display, (cx_dot, cy_dot), 3, (0, 255, 0), -1)
