@@ -668,10 +668,15 @@ def _sync_generate_frames(video_source, ref_settings=None):
             if not is_live:
                 work_time = time.time() - t_frame_start
                 sleep_time = frame_interval - work_time
-                if sleep_time > 0.001:
+                if sleep_time > 0.005:
                     time.sleep(sleep_time)
                 else:
-                    time.sleep(0.001)
+                    time.sleep(0.005)
+            else:
+                time.sleep(0.002)
+
+            if f_idx % 60 == 0:
+                gc.collect()
 
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
