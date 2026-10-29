@@ -122,7 +122,8 @@ export default function LoginPage() {
                   type="text"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
-                  placeholder="you@agency.gov"
+                  placeholder="admin@giotag.gov or admin"
+                  autoComplete="username"
                 />
               </div>
             </div>
