@@ -191,7 +191,47 @@ def ensure_super_admin_active():
             )
             db.add(admin)
             db.commit()
-            print("[OK] Super admin created: admin@giotag.gov / Admin@123!")
+        # Also ensure other demo accounts (deptadmin, officer1, viewer) exist for demo buttons
+        for demo in DEMO_USERS:
+            if demo["email"] == "admin@giotag.gov":
+                continue
+            u = db.query(User).filter(User.email == demo["email"]).first()
+            if not u:
+                dept_code = demo["dept_code"]
+                d = db.query(Department).filter(Department.code == dept_code).first()
+                if not d:
+                    d = Department(
+                        id=str(uuid.uuid4()),
+                        name=dept_code,
+                        code=dept_code,
+                        description=f"{dept_code} Department",
+                    )
+                    db.add(d)
+                    db.flush()
+                u_new = User(
+                    id=str(uuid.uuid4()),
+                    email=demo["email"],
+                    username=demo["username"],
+                    full_name=demo["full_name"],
+                    phone=demo["phone"],
+                    hashed_password=hash_password(demo["password"]),
+                    role=demo["role"],
+                    department_id=d.id,
+                    is_active=True,
+                    is_verified=True,
+                    deleted_at=None,
+                )
+                db.add(u_new)
+                db.commit()
+                print(f"[OK] Demo user created: {demo['email']}")
+            else:
+                from app.security.password import verify_password
+                if not verify_password(demo["password"], u.hashed_password):
+                    u.hashed_password = hash_password(demo["password"])
+                    u.is_active = True
+                    u.deleted_at = None
+                    db.commit()
+                    print(f"[FIX] Demo user password reset: {demo['email']}")
 
     except Exception as e:
         db.rollback()
