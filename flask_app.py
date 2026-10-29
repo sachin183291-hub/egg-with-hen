@@ -97,26 +97,47 @@ if not os.path.exists(MODEL_PATH):
         MODEL_PATH = next((p for p in nano_paths if os.path.exists(p)), 'yolov8n.pt')
 
 model = None
+ort_session = None
+ort_input_name = None
 
 def get_tracking_model():
-    global model
-    if model is None:
+    global model, ort_session, ort_input_name
+    if ort_session is not None or model is not None:
+        return ort_session if ort_session is not None else model
+
+    if MODEL_PATH.endswith('.onnx') and os.path.exists(MODEL_PATH):
         try:
-            import sys
-            b_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'backend'))
-            if b_dir not in sys.path:
-                sys.path.insert(0, b_dir)
-            from app.ai.shared_model import get_shared_model
-            model = get_shared_model(MODEL_PATH)
-        except Exception:
-            try:
-                print(f"[FLASK] Loading model directly from {MODEL_PATH}...")
-                model = YOLO(MODEL_PATH, task="detect") if MODEL_PATH.endswith(".onnx") else YOLO(MODEL_PATH)
-                dummy = np.zeros((352, 352, 3), dtype=np.uint8)
-                model.predict(dummy, imgsz=352, conf=0.1, verbose=False)
-            except Exception as e:
-                print(f"[FLASK] Error loading model: {e}")
-                model = None
+            import onnxruntime as ort
+            sess_opts = ort.SessionOptions()
+            sess_opts.intra_op_num_threads = 2
+            sess_opts.inter_op_num_threads = 1
+            sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            ort_session = ort.InferenceSession(MODEL_PATH, sess_opts, providers=['CPUExecutionProvider'])
+            ort_input_name = ort_session.get_inputs()[0].name
+            # Warmup
+            dummy = np.zeros((1, 3, 352, 352), dtype=np.float32)
+            ort_session.run(None, {ort_input_name: dummy})
+            print(f"[TRACKER] Direct ONNX runtime loaded & warmed up from {MODEL_PATH}!")
+            return ort_session
+        except Exception as e:
+            print(f"[TRACKER] Notice: Direct ONNX load error: {e}")
+
+    try:
+        import sys
+        b_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'backend'))
+        if b_dir not in sys.path:
+            sys.path.insert(0, b_dir)
+        from app.ai.shared_model import get_shared_model
+        model = get_shared_model(MODEL_PATH)
+    except Exception:
+        try:
+            print(f"[FLASK] Loading model directly from {MODEL_PATH}...")
+            model = YOLO(MODEL_PATH, task="detect") if MODEL_PATH.endswith(".onnx") else YOLO(MODEL_PATH)
+            dummy = np.zeros((352, 352, 3), dtype=np.uint8)
+            model.predict(dummy, imgsz=352, conf=0.1, verbose=False)
+        except Exception as e:
+            print(f"[FLASK] Error loading model: {e}")
+            model = None
     return model
 
 CONF_THRESHOLD = 0.25
@@ -288,9 +309,43 @@ def _sync_generate_frames(video_source, ref_settings=None):
             scale_x_det = OUT_W / float(in_w)
             scale_y_det = OUT_H / float(in_h)
 
-            res = active_model.predict(f_img, imgsz=imgsz, conf=conf_thresh, iou=0.40, verbose=False)[0]
-            if res.boxes is None or len(res.boxes) == 0:
-                return []
+            raw_boxes = []
+            raw_confs = []
+
+            # Check if active_model is an ONNX Runtime InferenceSession
+            if hasattr(active_model, 'run') and not hasattr(active_model, 'predict'):
+                ai_in = cv2.resize(f_img, (imgsz, imgsz)).astype(np.float32) / 255.0
+                ai_tensor = np.transpose(ai_in, (2, 0, 1))[np.newaxis, ...]
+                inp_name = active_model.get_inputs()[0].name
+                preds = active_model.run(None, {inp_name: ai_tensor})[0][0] # (5, N)
+                
+                scale_ai_x = in_w / float(imgsz)
+                scale_ai_y = in_h / float(imgsz)
+                for i in range(preds.shape[1]):
+                    c = float(preds[4, i])
+                    if c > conf_thresh:
+                        cx_ai, cy_ai, w_ai, h_ai = preds[:4, i]
+                        cx_orig = float(cx_ai * scale_ai_x)
+                        cy_orig = float(cy_ai * scale_ai_y)
+                        w_orig = float(w_ai * scale_ai_x)
+                        h_orig = float(h_ai * scale_ai_y)
+                        raw_boxes.append([cx_orig - w_orig/2.0, cy_orig - h_orig/2.0, w_orig, h_orig])
+                        raw_confs.append(c)
+
+                if not raw_boxes:
+                    return []
+                indices = cv2.dnn.NMSBoxes(raw_boxes, raw_confs, score_threshold=conf_thresh, nms_threshold=0.40)
+                idx_list = indices.flatten() if hasattr(indices, 'flatten') else indices
+                bx_list = [raw_boxes[i] for i in idx_list]
+                cf_list = [raw_confs[i] for i in idx_list]
+            else:
+                res = active_model.predict(f_img, imgsz=imgsz, conf=conf_thresh, iou=0.40, verbose=False)[0]
+                if res.boxes is None or len(res.boxes) == 0:
+                    return []
+                bx = res.boxes.xyxy.cpu().numpy()
+                cf = res.boxes.conf.cpu().numpy()
+                bx_list = [[b[0], b[1], b[2] - b[0], b[3] - b[1]] for b in bx]
+                cf_list = [float(c) for c in cf]
 
             hsv = cv2.cvtColor(f_img, cv2.COLOR_BGR2HSV)
             h_ch, s_ch, v_ch = cv2.split(hsv)
@@ -302,14 +357,11 @@ def _sync_generate_frames(video_source, ref_settings=None):
             )
 
             candidates = []
-            bx = res.boxes.xyxy.cpu().numpy()
-            cf = res.boxes.conf.cpu().numpy()
-            for b, c in zip(bx, cf):
-                conf = float(c)
+            for b, conf in zip(bx_list, cf_list):
                 orig_x1 = max(0, min(in_w - 1, int(float(b[0]))))
                 orig_y1 = max(0, min(in_h - 1, int(float(b[1]))))
-                orig_x2 = max(0, min(in_w - 1, int(float(b[2]))))
-                orig_y2 = max(0, min(in_h - 1, int(float(b[3]))))
+                orig_x2 = max(0, min(in_w - 1, int(float(b[0] + b[2]))))
+                orig_y2 = max(0, min(in_h - 1, int(float(b[1] + b[3]))))
 
                 crop = comb_mask[orig_y1:orig_y2, orig_x1:orig_x2]
                 if np.count_nonzero(crop) < 12:
