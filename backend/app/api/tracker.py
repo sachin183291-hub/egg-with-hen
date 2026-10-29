@@ -237,16 +237,25 @@ def stream_video_cam():
     )
 
 @router.get("/diag")
-def tracker_diag(video_name: str = "demo_hen_video.mp4"):
-    import time, traceback
+def tracker_diag(video_name: str = "demo_hen_video.mp4", step: str = "all"):
+    import time, traceback, sys
     log = []
     t0 = time.time()
     def mark(msg):
         log.append(f"[{time.time()-t0:.3f}s] {msg}")
 
-    mark("Starting diag")
+    mark(f"Starting diag (step={step})")
     try:
+        mark(f"Python: {sys.version.split()[0]}, os: {os.name}")
         mark(f"PROJECT_ROOT: {PROJECT_ROOT}, UPLOAD_DIR: {UPLOAD_DIR}")
+        
+        from app.ai.shared_model import resolve_model_path, _SHARED_MODEL_PATH
+        mark(f"resolve_model_path: {resolve_model_path()}")
+        mark(f"_SHARED_MODEL_PATH: {_SHARED_MODEL_PATH}")
+
+        if step == "info":
+            return {"success": True, "log": log}
+
         mark(f"Checking video '{video_name}'")
         filepath = str(UPLOAD_DIR / video_name)
         if not os.path.exists(filepath):
@@ -276,11 +285,26 @@ def tracker_diag(video_name: str = "demo_hen_video.mp4"):
         cap.release()
         mark(f"cap.read() ret: {ret}, frame shape: {frame.shape if ret else None}")
         
+        if step == "video":
+            return {"success": True, "log": log}
+
         # Test model loading
         mark("Testing model loading...")
         model = flask_app.get_tracking_model() if flask_app else None
         mark(f"Model loaded: {type(model).__name__ if model else None}")
-        
+
+        if step == "model":
+            return {"success": True, "log": log}
+
+        # Test 1 predict call
+        mark("Testing model.predict on 352 dummy...")
+        dummy = np.zeros((352, 352, 3), dtype=np.uint8)
+        pred = model.predict(dummy, imgsz=352, verbose=False)
+        mark("model.predict finished!")
+
+        if step == "predict":
+            return {"success": True, "log": log}
+
         # Test 1 frame generation
         mark("Calling _sync_generate_frames next()...")
         gen = flask_app._sync_generate_frames(filepath)
