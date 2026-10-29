@@ -985,10 +985,9 @@ def flask_live_frame():
 @app.route('/reset', methods=['POST'])
 @app.route('/api/tracker/reset', methods=['POST'])
 def flask_reset():
-    global _flask_live_tracker, current_total_count, current_live_count, active_stream_session_id
+    global _flask_live_tracker, current_total_count, current_live_count
     current_total_count = 0
     current_live_count = 0
-    active_stream_session_id += 1
     if _flask_live_tracker is not None:
         _flask_live_tracker.reset_state()
     return jsonify({"success": True})

@@ -82,7 +82,6 @@ def reset_tracking():
     if flask_app:
         flask_app.current_total_count = 0
         flask_app.current_live_count = 0
-        flask_app.active_stream_session_id += 1
     return {"success": True}
 
 # ─── Flask Legacy Integration for Hen Comb Tracking ────────────────────────────
@@ -236,3 +235,58 @@ def stream_video_cam():
         media_type='multipart/x-mixed-replace; boundary=frame',
         headers=stream_headers
     )
+
+@router.get("/diag")
+def tracker_diag(video_name: str = "demo_hen_video.mp4"):
+    import time, traceback
+    log = []
+    t0 = time.time()
+    def mark(msg):
+        log.append(f"[{time.time()-t0:.3f}s] {msg}")
+
+    mark("Starting diag")
+    try:
+        mark(f"PROJECT_ROOT: {PROJECT_ROOT}, UPLOAD_DIR: {UPLOAD_DIR}")
+        mark(f"Checking video '{video_name}'")
+        filepath = str(UPLOAD_DIR / video_name)
+        if not os.path.exists(filepath):
+            possible = [
+                os.path.abspath(os.path.join("uploads", video_name)),
+                os.path.abspath(os.path.join("backend", "uploads", video_name)),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", video_name)),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.getcwd(), "demo_hen_video.mp4")),
+                os.path.abspath(os.path.join(os.getcwd(), "backend", "demo_hen_video.mp4")),
+            ]
+            found = next((p for p in possible if os.path.exists(p)), None)
+            if found:
+                filepath = found
+            else:
+                mark(f"ERROR: Video not found in possible: {possible}")
+                return {"success": False, "log": log}
+        
+        mark(f"Found video at: {filepath} (size: {os.path.getsize(filepath)} bytes)")
+        
+        cap = cv2.VideoCapture(filepath)
+        mark(f"cap.isOpened(): {cap.isOpened()}")
+        if not cap.isOpened():
+            return {"success": False, "log": log, "error": "cap could not open video"}
+            
+        ret, frame = cap.read()
+        cap.release()
+        mark(f"cap.read() ret: {ret}, frame shape: {frame.shape if ret else None}")
+        
+        # Test model loading
+        mark("Testing model loading...")
+        model = flask_app.get_tracking_model() if flask_app else None
+        mark(f"Model loaded: {type(model).__name__ if model else None}")
+        
+        # Test 1 frame generation
+        mark("Calling _sync_generate_frames next()...")
+        gen = flask_app._sync_generate_frames(filepath)
+        f1 = next(gen)
+        mark(f"Generator yielded frame: {len(f1)} bytes!")
+        return {"success": True, "log": log}
+    except Exception as e:
+        mark(f"EXCEPTION: {e}\n{traceback.format_exc()}")
+        return {"success": False, "log": log, "error": str(e)}
