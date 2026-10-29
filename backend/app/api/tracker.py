@@ -113,8 +113,10 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 @router.post("/upload")
 async def tracker_upload(file: UploadFile = File(...)):
     try:
+        import re
         raw_name = file.filename or "video.mp4"
-        safe_filename = Path(raw_name).name
+        clean_name = re.sub(r'[^a-zA-Z0-9_.-]', '_', Path(raw_name).name)
+        safe_filename = clean_name or "video.mp4"
         temp_path = UPLOAD_DIR / safe_filename
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -158,14 +160,21 @@ async def tracker_stream_count():
 @router.get("/stream_video/{filename:path}")
 def stream_video_file(filename: str):
     import urllib.parse
+    import re
     clean_filename = urllib.parse.unquote(filename)
+    sanitized_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', Path(clean_filename).name)
     filepath = str(UPLOAD_DIR / clean_filename)
+    if not os.path.exists(filepath):
+        filepath = str(UPLOAD_DIR / sanitized_filename)
+
     if not os.path.exists(filepath):
         # Fallback check relative to cwd or root uploads
         possible = [
-            os.path.abspath(os.path.join("uploads", filename)),
-            os.path.abspath(os.path.join("backend", "uploads", filename)),
-            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", filename)),
+            os.path.abspath(os.path.join("uploads", clean_filename)),
+            os.path.abspath(os.path.join("backend", "uploads", clean_filename)),
+            os.path.abspath(os.path.join("uploads", sanitized_filename)),
+            os.path.abspath(os.path.join("backend", "uploads", sanitized_filename)),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../uploads", clean_filename)),
             os.path.abspath(os.path.join(os.path.dirname(__file__), "../../demo_hen_video.mp4")),
             os.path.abspath(os.path.join(os.getcwd(), "demo_hen_video.mp4")),
             os.path.abspath(os.path.join(os.getcwd(), "backend", "demo_hen_video.mp4")),
