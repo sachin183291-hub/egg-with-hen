@@ -236,6 +236,23 @@ def stream_video_cam():
         headers=stream_headers
     )
 
+@router.get("/quick_status")
+async def quick_status():
+    import sys, platform
+    from app.ai.shared_model import resolve_model_path, _SHARED_MODEL_PATH
+    return {
+        "status": "online",
+        "python": sys.version,
+        "platform": platform.platform(),
+        "cwd": os.getcwd(),
+        "project_root": str(PROJECT_ROOT),
+        "upload_dir": str(UPLOAD_DIR),
+        "upload_dir_exists": UPLOAD_DIR.exists(),
+        "upload_files": [f.name for f in UPLOAD_DIR.iterdir()] if UPLOAD_DIR.exists() else [],
+        "resolved_model": resolve_model_path(),
+        "loaded_model": str(_SHARED_MODEL_PATH),
+    }
+
 @router.get("/diag")
 def tracker_diag(video_name: str = "demo_hen_video.mp4", step: str = "all"):
     import time, traceback, sys

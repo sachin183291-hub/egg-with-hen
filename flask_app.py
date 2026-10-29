@@ -344,28 +344,30 @@ def _sync_generate_frames(video_source, ref_settings=None):
         except Exception:
             return []
 
-    # Frame 0: Seed only hens strictly inside the detection zone using crisp full-frame
+    # Frame 0: Quick initialization - on cloud (Render), skip heavy sync inference on frame 0 to yield first frame immediately
     disp0 = cv2.resize(sample_frame, (OUT_W, OUT_H), interpolation=cv2.INTER_LINEAR)
     hens = {}
     next_id = 1
-    try:
-        init_dets = extract_combs(sample_frame, conf_thresh=0.03, imgsz=352)
-        init_in_zone = [d for d in init_dets if is_in_zone(d["center"][0], d["center"][1])]
-        if OUT_W < OUT_H:
-            init_in_zone.sort(key=lambda d: -d["center"][1])
-        else:
-            init_in_zone.sort(key=lambda d: (d["center"][1] // 40, d["center"][0]))
-        for d in init_in_zone:
-            hid = next_id
-            next_id += 1
-            hens[hid] = {
-                "box": list(d["box"]),
-                "center": d["center"],
-                "lost": 0,
-                "hits": 3
-            }
-    except Exception as e:
-        print(f"[TRACKER Frame 0 Note] {e}")
+    # If not on constrained cloud, seed frame 0 synchronously; otherwise background worker handles it
+    if os.environ.get("RENDER") != "true":
+        try:
+            init_dets = extract_combs(sample_frame, conf_thresh=0.03, imgsz=352)
+            init_in_zone = [d for d in init_dets if is_in_zone(d["center"][0], d["center"][1])]
+            if OUT_W < OUT_H:
+                init_in_zone.sort(key=lambda d: -d["center"][1])
+            else:
+                init_in_zone.sort(key=lambda d: (d["center"][1] // 40, d["center"][0]))
+            for d in init_in_zone:
+                hid = next_id
+                next_id += 1
+                hens[hid] = {
+                    "box": list(d["box"]),
+                    "center": d["center"],
+                    "lost": 0,
+                    "hits": 3
+                }
+        except Exception as e:
+            print(f"[TRACKER Frame 0 Note] {e}")
 
     current_total_count = max(0, next_id - 1)
     current_live_count = len(hens)
@@ -401,6 +403,7 @@ def _sync_generate_frames(video_source, ref_settings=None):
                     ai_results = fresh_dets
             except Exception:
                 pass
+            time.sleep(0.02)
 
     ai_worker_thread = threading.Thread(target=ai_worker_proc, daemon=True)
     ai_worker_thread.start()
@@ -446,36 +449,42 @@ def _sync_generate_frames(video_source, ref_settings=None):
             # 1. Multi-point Lucas-Kanade Optical Flow on active hen heads inside zone
             active_ids = [hid for hid, h in hens.items() if h["lost"] <= 8 and is_in_zone(*h["center"])]
             if len(active_ids) > 0 and prev_gray is not None:
+                is_cloud = os.environ.get("RENDER") == "true"
+                hen_shifts = {hid: [] for hid in active_ids}
                 pts_in = []
                 pt_map = []
                 for hid in active_ids:
                     x1, y1, x2, y2 = hens[hid]["box"]
                     cx, cy = hens[hid]["center"]
                     bw, bh = x2 - x1, y2 - y1
-                    quad_pts = [
-                        (cx, cy),
-                        (cx - bw * 0.22, cy - bh * 0.22),
-                        (cx + bw * 0.22, cy - bh * 0.22),
-                        (cx - bw * 0.22, cy + bh * 0.22),
-                        (cx + bw * 0.22, cy + bh * 0.22),
-                    ]
+                    if is_cloud:
+                        quad_pts = [(cx, cy), (cx, cy - bh * 0.15)]
+                    else:
+                        quad_pts = [
+                            (cx, cy),
+                            (cx - bw * 0.22, cy - bh * 0.22),
+                            (cx + bw * 0.22, cy - bh * 0.22),
+                            (cx - bw * 0.22, cy + bh * 0.22),
+                            (cx + bw * 0.22, cy + bh * 0.22),
+                        ]
                     for p in quad_pts:
                         pts_in.append([[p[0], p[1]]])
                         pt_map.append(hid)
 
                 pts_in_arr = np.array(pts_in, dtype=np.float32)
+                lk_win = (17, 17) if is_cloud else (21, 21)
+                lk_levels = 2 if is_cloud else 3
                 pts_out, status, _ = cv2.calcOpticalFlowPyrLK(
                     prev_gray, gray, pts_in_arr, None,
-                    winSize=(21, 21), maxLevel=3,
-                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 12, 0.03)
+                    winSize=lk_win, maxLevel=lk_levels,
+                    criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03)
                 )
 
-                hen_shifts = {hid: [] for hid in active_ids}
                 for i, hid in enumerate(pt_map):
                     if status[i][0] == 1:
                         dx = float(pts_out[i][0][0] - pts_in_arr[i][0][0])
                         dy = float(pts_out[i][0][1] - pts_in_arr[i][0][1])
-                        if abs(dx) < 18 and abs(dy) < 18:
+                        if abs(dx) < 22 and abs(dy) < 22:
                             hen_shifts[hid].append((dx, dy))
 
                 for hid, shifts in hen_shifts.items():
@@ -565,10 +574,12 @@ def _sync_generate_frames(video_source, ref_settings=None):
                             "hits": 1
                         }
 
-            # 3. Dispatch current crisp frame to AI worker
-            with ai_lock:
-                if ai_frame is None:
-                    ai_frame = frame.copy()
+            # 3. Dispatch current crisp frame to AI worker (throttled to avoid CPU thrashing)
+            ai_interval = 8 if os.environ.get("RENDER") == "true" else 3
+            if f_idx % ai_interval == 0:
+                with ai_lock:
+                    if ai_frame is None:
+                        ai_frame = frame.copy()
 
             # 4. Immediate retirement: when a hen leaves the zone or is lost, remove its box immediately!
             for hid in list(hens.keys()):
