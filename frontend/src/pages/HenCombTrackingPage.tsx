@@ -76,7 +76,7 @@ export default function HenCombTrackingPage() {
     setBackendPingStatus('checking')
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 8000)
+      const timeoutId = setTimeout(() => controller.abort(), 25000)
       const res = await fetch(target, { signal: controller.signal, cache: 'no-store' })
       clearTimeout(timeoutId)
       if (res.ok) {
@@ -89,7 +89,7 @@ export default function HenCombTrackingPage() {
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        // Taking > 8s means Render backend is currently waking up
+        // Taking > 25s means Render backend is cold starting
         setBackendPingStatus('sleeping')
       } else {
         setBackendPingStatus('offline')

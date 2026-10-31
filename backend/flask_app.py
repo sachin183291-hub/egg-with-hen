@@ -396,30 +396,28 @@ def _sync_generate_frames(video_source, ref_settings=None):
         except Exception:
             return []
 
-    # Frame 0: Quick initialization - on cloud (Render), skip heavy sync inference on frame 0 to yield first frame immediately
+    # Frame 0: Immediate comb seeding with ultra-fast ONNX model (< 200ms) on all environments
     disp0 = cv2.resize(sample_frame, (OUT_W, OUT_H), interpolation=cv2.INTER_LINEAR)
     hens = {}
     next_id = 1
-    # If not on constrained cloud, seed frame 0 synchronously; otherwise background worker handles it
-    if os.environ.get("RENDER") != "true":
-        try:
-            init_dets = extract_combs(sample_frame, conf_thresh=0.03, imgsz=352)
-            init_in_zone = [d for d in init_dets if is_in_zone(d["center"][0], d["center"][1])]
-            if OUT_W < OUT_H:
-                init_in_zone.sort(key=lambda d: -d["center"][1])
-            else:
-                init_in_zone.sort(key=lambda d: (d["center"][1] // 40, d["center"][0]))
-            for d in init_in_zone:
-                hid = next_id
-                next_id += 1
-                hens[hid] = {
-                    "box": list(d["box"]),
-                    "center": d["center"],
-                    "lost": 0,
-                    "hits": 3
-                }
-        except Exception as e:
-            print(f"[TRACKER Frame 0 Note] {e}")
+    try:
+        init_dets = extract_combs(sample_frame, conf_thresh=0.03, imgsz=352)
+        init_in_zone = [d for d in init_dets if is_in_zone(d["center"][0], d["center"][1])]
+        if OUT_W < OUT_H:
+            init_in_zone.sort(key=lambda d: -d["center"][1])
+        else:
+            init_in_zone.sort(key=lambda d: (d["center"][1] // 40, d["center"][0]))
+        for d in init_in_zone:
+            hid = next_id
+            next_id += 1
+            hens[hid] = {
+                "box": list(d["box"]),
+                "center": d["center"],
+                "lost": 0,
+                "hits": 3
+            }
+    except Exception as e:
+        print(f"[TRACKER Frame 0 Note] {e}")
 
     current_total_count = max(0, next_id - 1)
     current_live_count = len(hens)
@@ -627,7 +625,7 @@ def _sync_generate_frames(video_source, ref_settings=None):
                         }
 
             # 3. Dispatch current crisp frame to AI worker (throttled to avoid CPU thrashing)
-            ai_interval = 8 if os.environ.get("RENDER") == "true" else 3
+            ai_interval = 4 if os.environ.get("RENDER") == "true" else 3
             if f_idx % ai_interval == 0:
                 with ai_lock:
                     if ai_frame is None:
